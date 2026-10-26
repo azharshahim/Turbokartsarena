@@ -1,5 +1,7 @@
 /** Vérifie que le fichier unique fonctionne SANS réseau (file:// + requêtes bloquées). */
 import { chromium } from 'playwright';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 const browser = await chromium.launch({ args: ['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--allow-file-access-from-files'] });
 const page = await browser.newPage({ viewport: { width: 800, height: 450 } });
 const errs = [], requests = [];
@@ -12,7 +14,8 @@ await page.route('**', route => {
   if (u.startsWith('file://')) return route.continue();
   return route.abort();
 });
-await page.goto('file:///home/user/turbo-karts-arena/dist/turbo-karts-arena.html', { waitUntil: 'load' });
+const htmlPath = resolve(process.env.STANDALONE_HTML ?? 'index.html');
+await page.goto(pathToFileURL(htmlPath).href, { waitUntil: 'load' });
 await page.waitForTimeout(2000);
 console.log('erreurs au chargement :', errs.slice(0,6).join(' | ') || 'aucune');
 console.log('__tka :', await page.evaluate(() => typeof window.__tka));

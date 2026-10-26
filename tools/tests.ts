@@ -12,6 +12,7 @@ import { ROSTER } from '../src/game/roster';
 import { makeBrain, thinkAi } from '../src/core/ai';
 import { makeRng } from '../src/core/math';
 import { PHYSICS, autoQuality } from '../src/core/config';
+import { MultiTouchControls } from '../src/core/touchControls';
 
 let passed = 0;
 let failed = 0;
@@ -79,6 +80,24 @@ test('le cap, la piste et la trajectoire utilisent la même convention', () => {
   }
 });
 
+
+test('commandes tactiles : deux doigts indépendants et relâchement exact', () => {
+  const input = new MultiTouchControls();
+  input.press(11, 'left');
+  input.press(22, 'drift');
+  assert(input.steer === -1 && input.drift, 'gauche + dérapage ne sont pas simultanés');
+  input.release(11);
+  assert(input.steer === 0 && input.drift, 'relâcher gauche a annulé le dérapage');
+  input.press(33, 'right');
+  assert(input.steer === 1, 'le pouce droit ne dirige pas');
+  input.press(44, 'left');
+  assert(input.steer === 0, 'deux directions simultanées doivent être neutres');
+  input.release(44);
+  assert(input.steer === 1, 'relâcher gauche a annulé le doigt droit encore tenu');
+  input.clear();
+  assert(input.activePointerCount === 0 && !input.drift, 'clear() laisse une commande coincée');
+});
+
 /* ================================================================== */
 console.log('\n▸ Pistes');
 /* ================================================================== */
@@ -116,6 +135,51 @@ for (const circuit of CIRCUITS) {
     assert(onTrack.onRoad && Math.abs(onTrack.lateral) < 0.3, 'point central mal classé');
   });
 }
+
+
+test('route élargie de 25 % : limites de surface et dégagement préservés', () => {
+  for (const circuit of CIRCUITS) {
+    const base = new Track({ ...circuit, widthScale: 1 });
+    const wide = new Track({ ...circuit, widthScale: 1.25 });
+    assert(Math.abs(wide.length - base.length) < 1e-6, `${circuit.name} : longueur modifiée`);
+    let expandedSamples = 0;
+    let curbProbe = false;
+    for (let i = 0; i < wide.count; i += 7) {
+      const a = base.samples[i];
+      const b = wide.samples[i];
+      assert(b.halfWidth >= a.halfWidth - 1e-6, `${circuit.name} : largeur rétrécie`);
+      assert(b.halfWidth <= a.halfWidth * 1.25 + 1e-6, `${circuit.name} : élargissement disproportionné`);
+      if (b.halfWidth >= a.halfWidth * 1.18) expandedSamples++;
+      const center = wide.query(b.x, b.z, i);
+      assert(center.onRoad, `${circuit.name} : centre classé hors piste`);
+      // Vérifier les seuils sur une zone presque droite, où la projection locale
+      // ne peut pas confondre l'intérieur d'une épingle avec un autre échantillon.
+      if (Math.abs(b.curvature) < 0.006 && !curbProbe) {
+        for (const side of [-1, 1]) {
+          const curb = wide.query(b.x + b.rx * side * (b.halfWidth + 1), b.z + b.rz * side * (b.halfWidth + 1), i);
+          const grass = wide.query(b.x + b.rx * side * (b.halfWidth + 2.2), b.z + b.rz * side * (b.halfWidth + 2.2), i);
+          if (curb.surface === 'curb' && grass.surface === 'grass') curbProbe = true;
+        }
+      }
+    }
+    assert(expandedSamples > 0, `${circuit.name} : aucun secteur n'a été élargi`);
+    assert(curbProbe, `${circuit.name} : bordure / zone hors-piste non alignées sur la largeur`);
+    // Les bords des tronçons éloignés doivent rester séparés : pas de raccourci
+    // créé par deux chaussées qui se recouvrent après l'élargissement.
+    let minGap = Infinity;
+    const separation = Math.ceil(80 / wide.step);
+    for (let i = 0; i < wide.count; i += 3) {
+      for (let j = i + separation; j < wide.count; j += 3) {
+        const circular = Math.min(j - i, wide.count - (j - i));
+        if (circular < separation) continue;
+        const p = wide.samples[i];
+        const q = wide.samples[j];
+        minGap = Math.min(minGap, Math.hypot(p.x - q.x, p.z - q.z) - p.halfWidth - q.halfWidth);
+      }
+    }
+    assert(minGap > 5, `${circuit.name} : chaussées trop proches / raccourci (${minGap.toFixed(1)} m)`);
+  }
+});
 
 test('déterminisme : deux constructions identiques donnent la même piste', () => {
   const a = new Track(CIRCUITS[1]);
@@ -358,7 +422,7 @@ test('un kart lourd pousse un kart léger', () => {
 console.log('\n▸ Course complète (IA)');
 /* ================================================================== */
 
-for (const circuit of CIRCUITS.slice(0, 2)) {
+for (const circuit of CIRCUITS) {
   test(`${circuit.name} : 3 tours bouclés par l’IA, sans blocage`, () => {
     const race = new Race({ circuit, opponents: 5 });
     const brain = makeBrain(makeRng(7), 1);

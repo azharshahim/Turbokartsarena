@@ -2,7 +2,7 @@
 <html lang="fr">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#070a16" />
     <title>Turbo Karts Arena — Preview</title>
     <script type="importmap">
@@ -20,10 +20,13 @@
         font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
         color: #eaf0ff;
         -webkit-font-smoothing: antialiased;
-        touch-action: none;
+        touch-action: manipulation;
         user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
       }
       #stage { position: fixed; inset: 0; }
+      body.racing #stage { touch-action: none; }
       canvas { display: block; width: 100%; height: 100%; }
 
       /* ---------- HUD ---------- */
@@ -36,7 +39,7 @@
         backdrop-filter: blur(8px);
         padding: 8px 14px;
       }
-      .hud-top { position: absolute; top: 16px; left: 16px; right: 16px; display: flex; gap: 10px; align-items: flex-start; }
+      .hud-top { position: absolute; top: max(12px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right)); display: flex; gap: 10px; align-items: flex-start; }
       .label { font-size: 10px; letter-spacing: 2.4px; color: #8497c4; font-weight: 700; }
       .value { font-size: 25px; font-weight: 900; line-height: 1.05; font-variant-numeric: tabular-nums; }
       .value small { font-size: 13px; color: #93a6cc; font-weight: 700; }
@@ -59,20 +62,21 @@
       #toast { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); font-size: 30px; font-weight: 900; letter-spacing: 3px; opacity: 0; transition: opacity 0.25s, transform 0.25s; text-shadow: 0 6px 30px rgba(0,0,0,.6); }
       #toast.show { opacity: 1; transform: translateX(-50%) translateY(-8px); }
 
-      #controls { position: absolute; inset: auto 0 0 0; height: 190px; display: flex; align-items: flex-end; padding: 0 22px 22px; pointer-events: none; }
+      #controls { position: absolute; inset: auto 0 0 0; height: 190px; display: flex; align-items: flex-end; padding: 0 max(16px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); pointer-events: none; touch-action: none; }
       .padBtn {
         pointer-events: auto; width: 96px; height: 96px; border-radius: 50%;
         background: rgba(18, 26, 51, 0.72); border: 1px solid rgba(120, 160, 255, 0.2);
         display: flex; align-items: center; justify-content: center; color: #fff;
         font-size: 34px; font-weight: 900; margin-right: 12px; transition: transform 0.08s, background 0.12s;
-        backdrop-filter: blur(6px);
+        backdrop-filter: blur(6px); touch-action: none; user-select: none; -webkit-user-select: none;
       }
       .padBtn.active { background: rgba(64, 200, 255, 0.34); transform: scale(0.94); }
       .actionBtn {
         pointer-events: auto; width: 104px; height: 104px; border-radius: 50%;
         display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-        font-size: 11px; font-weight: 900; letter-spacing: 1.2px; margin-left: 12px;
+        font-size: 11px; font-family: inherit; color: #fff; font-weight: 900; letter-spacing: 1.2px; margin-left: 12px; padding: 0; cursor: pointer;
         border: 1px solid rgba(255,255,255,.14); transition: transform 0.08s, filter 0.12s;
+        touch-action: none; user-select: none; -webkit-user-select: none;
       }
       .actionBtn.active { transform: scale(0.93); filter: brightness(1.35); }
       #brakeBtn { background: rgba(255, 61, 110, 0.72); }
@@ -80,7 +84,11 @@
       .actionBtn svg { width: 26px; height: 26px; }
       #driftBtn .tierRing { position: absolute; inset: -6px; border-radius: 50%; border: 3px solid transparent; }
 
-      #pauseBtn { pointer-events: auto; }
+      #pauseBtn { pointer-events: auto; min-width: 72px; min-height: 48px; display: flex; align-items: center; justify-content: center; gap: 8px; color: #eaf0ff; font: inherit; font-weight: 900; letter-spacing: 1px; cursor: pointer; touch-action: none; }
+      #pauseBtn:hover { background: rgba(24, 36, 68, 0.92); }
+      body.gyro-on #leftBtn, body.gyro-on #rightBtn { display: none; }
+      #pauseBtn:focus-visible, .tool:focus-visible, .padBtn:focus-visible, .actionBtn:focus-visible { outline: 3px solid #40c8ff; outline-offset: 3px; }
+      #fpsInline { display: none; }
 
       /* ---------- overlays ---------- */
       .overlay {
@@ -130,20 +138,32 @@
       #fpsBadge { position: fixed; left: 50%; top: 8px; transform: translateX(-50%); font-size: 10.5px; letter-spacing: 1.6px;
         color: #6e82b0; background: rgba(7, 10, 22, 0.72); padding: 4px 10px; border-radius: 20px; z-index: 30; display: none; }
       #fpsBadge.on { display: block; }
+      #rotateNotice { display: none; }
       #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #070a16; z-index: 40; gap: 14px; }
       #loading.hidden { display: none; }
       .spinner { width: 46px; height: 46px; border-radius: 50%; border: 3px solid #1b2748; border-top-color: #40c8ff; animation: spin 0.9s linear infinite; }
       @keyframes spin { to { transform: rotate(360deg); } }
+      @media (orientation: portrait) and (max-width: 700px) {
+        body.racing #rotateNotice { position: fixed; inset: 0; z-index: 15; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; text-align: center; background: rgba(7,10,22,.94); color: #eaf0ff; font-weight: 900; letter-spacing: 1.2px; touch-action: none; }
+        #rotateNotice svg { width: 42px; height: 42px; color: #40c8ff; }
+      }
       @media (max-width: 700px) {
-        #speed { font-size: 48px; }
+        #speed { font-size: clamp(38px, 10vh, 48px); }
         #minimap { width: 96px; height: 96px; }
-        .padBtn { width: 78px; height: 78px; font-size: 26px; }
-        .actionBtn { width: 84px; height: 84px; font-size: 9px; }
+        .padBtn { width: clamp(82px, 15vh, 100px); height: clamp(82px, 15vh, 100px); font-size: 32px; margin-right: clamp(8px, 2vw, 14px); }
+        .actionBtn { width: clamp(82px, 15vh, 100px); height: clamp(82px, 15vh, 100px); font-size: 10px; margin-left: clamp(8px, 2vw, 14px); }
+        .hud-top { gap: 6px; }
+        .panel { padding: 7px 10px; }
+        #pauseBtn { min-width: 56px; }
       }
     </style>
   </head>
   <body>
     <div id="stage"></div>
+    <div id="rotateNotice" role="status">
+      <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="7" width="14" height="10" rx="2"/><path d="M9 4l-3 3 3 3M15 20l3-3-3-3"/></svg>
+      TOURNE TON TÉLÉPHONE EN PAYSAGE POUR JOUER
+    </div>
 
     <!-- HUD de course -->
     <div id="hud">
@@ -161,9 +181,10 @@
           <div class="value"><span id="place">1</span><small>/<span id="total">6</span></small></div>
         </div>
         <div class="spacer"></div>
-        <div class="panel" id="pauseBtn" style="cursor: pointer; display: flex; align-items: center; gap: 8px">
-          <span class="label" id="fpsInline">— FPS</span>
-        </div>
+        <button class="panel" id="pauseBtn" type="button" aria-label="Mettre la course en pause">
+          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M7 5h4v14H7zm6 0h4v14h-4z"/></svg>
+          <span>PAUSE</span><span id="fpsInline" aria-hidden="true"></span>
+        </button>
       </div>
 
       <div id="places"></div>
@@ -186,17 +207,17 @@
       <div id="toast"></div>
 
       <div id="controls">
-        <div class="padBtn" id="leftBtn">‹</div>
-        <div class="padBtn" id="rightBtn">›</div>
+        <button class="padBtn" id="leftBtn" type="button" aria-label="Gauche">◀</button>
+        <button class="padBtn" id="rightBtn" type="button" aria-label="Droite">▶</button>
         <div class="spacer" style="flex: 1"></div>
-        <div class="actionBtn" id="brakeBtn">
+        <button class="actionBtn" id="brakeBtn" type="button" aria-label="Freiner">
           <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M12 3l7 3v6c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"/></svg>
           FREIN
-        </div>
-        <div class="actionBtn" id="driftBtn" style="position: relative">
+        </button>
+        <button class="actionBtn" id="driftBtn" type="button" aria-label="Maintenir pour déraper" style="position: relative">
           <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M3 17c3.5 0 4-9 8-9s4.5 9 8 9"/><path d="M16 5.5l3 2.5-3 2.5"/><circle cx="6.5" cy="19.5" r="1.6" fill="#fff"/><circle cx="17.5" cy="19.5" r="1.6" fill="#fff"/></svg>
           DÉRAPAGE
-        </div>
+        </button>
       </div>
     </div>
 
@@ -264,9 +285,9 @@
     <div class="overlay hidden" id="pause">
       <h1 style="font-size: 40px">PAUSE</h1>
       <div class="tools" style="margin-top: 12px">
-        <button class="tool" id="resumeBtn" style="padding: 16px 26px">▶ Reprendre</button>
-        <button class="tool" id="restartBtn" style="padding: 16px 26px">↻ Recommencer</button>
-        <button class="tool" id="quitBtn" style="padding: 16px 26px">Menu</button>
+        <button class="tool" id="resumeBtn" style="padding: 16px 26px; min-height: 52px">▶ REPRENDRE</button>
+        <button class="tool" id="restartBtn" style="padding: 16px 26px; min-height: 52px">↻ RECOMMENCER LA COURSE</button>
+        <button class="tool" id="quitBtn" style="padding: 16px 26px; min-height: 52px">MENU PRINCIPAL</button>
       </div>
       <div class="hint" id="pauseStats"></div>
     </div>

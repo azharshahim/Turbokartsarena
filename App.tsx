@@ -17,6 +17,7 @@ import { GLView } from 'expo-gl';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
+  AppState,
   Easing,
   Platform,
   SafeAreaView,
@@ -47,6 +48,7 @@ const DEFAULT_SETTINGS: Settings = { quality: 'auto', gyro: false, sound: true, 
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('menu');
+  const [paused, setPaused] = useState(false);
   const [circuitIndex, setCircuitIndex] = useState(0);
   const [profileIndex, setProfileIndex] = useState(0);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
@@ -66,9 +68,53 @@ export default function App() {
   });
 
   const engineRef = useRef<PhysicsEngine | null>(null);
-  const inputRef = useRef({ steer: 0, drift: false, brake: false });
+  const inputRef = useRef({ left: false, right: false, drift: false, brake: false });
+  const pausedRef = useRef(false);
+  const rafRef = useRef<number | null>(null);
+  const frameLoopRef = useRef<((t: number) => void) | null>(null);
+  const resultsTimeoutRef = useRef<any>(null);
   const gyroRef = useRef({ angle: 0, rest: 0, enabled: false });
   const hudTimer = useRef<any>(null);
+
+  const clearHeldInputs = useCallback(() => {
+    inputRef.current = { left: false, right: false, drift: false, brake: false };
+    gyroRef.current.rest = gyroRef.current.angle;
+  }, []);
+
+  const stopFrameLoop = useCallback(() => {
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+  }, []);
+
+  const pauseRace = useCallback(() => {
+    if (pausedRef.current) return;
+    clearHeldInputs();
+    pausedRef.current = true;
+    engineRef.current?.resetFrameClock();
+    if (resultsTimeoutRef.current) clearTimeout(resultsTimeoutRef.current);
+    resultsTimeoutRef.current = null;
+    stopFrameLoop();
+    setPaused(true);
+  }, [clearHeldInputs, stopFrameLoop]);
+
+  const resumeRace = useCallback(() => {
+    if (!pausedRef.current) return;
+    const engine = engineRef.current;
+    clearHeldInputs();
+    pausedRef.current = false;
+    engine?.resetFrameClock();
+    setPaused(false);
+    if (engine?.race.phase === 'finished') {
+      resultsTimeoutRef.current = setTimeout(() => {
+        if (!engine || engineRef.current !== engine || pausedRef.current) return;
+        stopFrameLoop();
+        engine.dispose();
+        engineRef.current = null;
+        setScreen('results');
+      }, 1600);
+    }
+    if (engine && frameLoopRef.current) rafRef.current = requestAnimationFrame(frameLoopRef.current);
+  }, [clearHeldInputs, stopFrameLoop]);
 
   /* ---------------- gyroscope ---------------- */
   useEffect(() => {
@@ -98,7 +144,7 @@ export default function App() {
     if (hudTimer.current) clearInterval(hudTimer.current);
     hudTimer.current = setInterval(() => {
       const e = engineRef.current;
-      if (!e) return;
+      if (!e || pausedRef.current) return;
       const race = e.race;
       const p = race.player;
       setHud({
@@ -121,12 +167,32 @@ export default function App() {
       if (race.phase === 'finished') {
         clearInterval(hudTimer.current);
         hudTimer.current = null;
-        setTimeout(() => setScreen('results'), 1600);
+        if (resultsTimeoutRef.current) clearTimeout(resultsTimeoutRef.current);
+        resultsTimeoutRef.current = setTimeout(() => {
+          if (engineRef.current !== e || pausedRef.current) return;
+          stopFrameLoop();
+          e.dispose();
+          engineRef.current = null;
+          setScreen('results');
+        }, 1600);
       }
     }, 66);
-  }, [settings.laps]);
+  }, [settings.laps, stopFrameLoop]);
 
-  useEffect(() => () => hudTimer.current && clearInterval(hudTimer.current), []);
+  useEffect(() => () => {
+    if (hudTimer.current) clearInterval(hudTimer.current);
+    if (resultsTimeoutRef.current) clearTimeout(resultsTimeoutRef.current);
+    stopFrameLoop();
+    engineRef.current?.dispose();
+    engineRef.current = null;
+  }, [stopFrameLoop]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active' && screen === 'race') pauseRace();
+    });
+    return () => subscription.remove();
+  }, [screen, pauseRace]);
 
   /* ---------------- démarrage / GLView ---------------- */
   const circuit: Circuit = CIRCUITS[circuitIndex];
@@ -177,18 +243,23 @@ export default function App() {
 
       // boucle de rendu pilotée par requestAnimationFrame (expo-gl l'expose)
       const loop = (t: number) => {
+        if (engineRef.current !== engine || pausedRef.current) {
+          rafRef.current = null;
+          return;
+        }
         const i = inputRef.current;
         const g = gyroRef.current;
-        let steer = i.steer;
+        let steer = i.left === i.right ? 0 : i.left ? -1 : 1;
         if (settings.gyro && g.enabled) {
           const delta = g.angle - g.rest;
           steer = Math.max(-1, Math.min(1, delta * 3.2));
         }
         engine.setInput({ steer, drift: i.drift, brake: i.brake, throttle: 1 });
         engine.frame(t);
-        requestAnimationFrame(loop);
+        rafRef.current = requestAnimationFrame(loop);
       };
-      requestAnimationFrame(loop);
+      frameLoopRef.current = loop;
+      rafRef.current = requestAnimationFrame(loop);
     },
     [circuit, profile, settings, startHudLoop],
   );
@@ -198,6 +269,15 @@ export default function App() {
   };
 
   const quitRace = () => {
+    clearHeldInputs();
+    pausedRef.current = false;
+    setPaused(false);
+    stopFrameLoop();
+    frameLoopRef.current = null;
+    if (hudTimer.current) clearInterval(hudTimer.current);
+    hudTimer.current = null;
+    if (resultsTimeoutRef.current) clearTimeout(resultsTimeoutRef.current);
+    resultsTimeoutRef.current = null;
     engineRef.current?.dispose();
     engineRef.current = null;
     setScreen('menu');
@@ -223,12 +303,26 @@ export default function App() {
           <GLView style={StyleSheet.absoluteFill} onContextCreate={onContextCreate} />
           <TouchHud
             hud={hud}
-            onSteer={(v) => (inputRef.current.steer = v)}
+            onLeft={(v) => (inputRef.current.left = v)}
+            onRight={(v) => (inputRef.current.right = v)}
             onDrift={(v) => (inputRef.current.drift = v)}
             onBrake={(v) => (inputRef.current.brake = v)}
-            onQuit={quitRace}
+            onPause={pauseRace}
             gyro={settings.gyro}
+            paused={paused}
           />
+          {paused && (
+            <PauseMenu
+              onResume={resumeRace}
+              onRestart={() => {
+                clearHeldInputs();
+                engineRef.current?.restart();
+                engineRef.current?.resetFrameClock();
+                resumeRace();
+              }}
+              onMenu={quitRace}
+            />
+          )}
         </View>
       )}
 
@@ -238,9 +332,11 @@ export default function App() {
           circuitName={circuit.name}
           profile={profile}
           onRestart={() => {
-            engineRef.current?.restart();
+            clearHeldInputs();
+            pausedRef.current = false;
+            setPaused(false);
+            setHud((current) => ({ ...current, results: null, time: 0, lap: 1, speed: 0 }));
             setScreen('race');
-            startHudLoop();
           }}
           onQuit={quitRace}
         />
@@ -373,14 +469,61 @@ const MenuScreen: React.FC<{
 /* HUD tactile                                                        */
 /* ------------------------------------------------------------------ */
 
+const HoldButton: React.FC<{
+  accessibilityLabel: string;
+  style: any;
+  onHold: (held: boolean) => void;
+  children: React.ReactNode;
+}> = ({ accessibilityLabel, style, onHold, children }) => {
+  const activeTouches = useRef(new Set<number>());
+  const [pressed, setPressed] = useState(false);
+  const getIds = (event: any): number[] => {
+    const changed = event.nativeEvent?.changedTouches;
+    if (changed?.length) return Array.from(changed, (touch: any) => Number(touch.identifier));
+    const id = event.nativeEvent?.identifier;
+    return [Number.isFinite(id) ? Number(id) : 0];
+  };
+  const onStart = (event: any) => {
+    for (const id of getIds(event)) activeTouches.current.add(id);
+    setPressed(true);
+    onHold(true);
+  };
+  const onEnd = (event: any) => {
+    for (const id of getIds(event)) activeTouches.current.delete(id);
+    const held = activeTouches.current.size > 0;
+    setPressed(held);
+    onHold(held);
+  };
+  const onCancel = () => {
+    activeTouches.current.clear();
+    setPressed(false);
+    onHold(false);
+  };
+  return (
+    <View
+      accessible
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      style={[style, pressed && { opacity: 0.78, transform: [{ scale: 0.94 }] }]}
+      onTouchStart={onStart}
+      onTouchEnd={onEnd}
+      onTouchCancel={onCancel}
+    >
+      {children}
+    </View>
+  );
+};
+
 const TouchHud: React.FC<{
   hud: any;
-  onSteer: (v: number) => void;
+  onLeft: (v: boolean) => void;
+  onRight: (v: boolean) => void;
   onDrift: (v: boolean) => void;
   onBrake: (v: boolean) => void;
-  onQuit: () => void;
+  onPause: () => void;
   gyro: boolean;
-}> = ({ hud, onSteer, onDrift, onBrake, onQuit, gyro }) => {
+  paused: boolean;
+}> = ({ hud, onLeft, onRight, onDrift, onBrake, onPause, gyro, paused }) => {
   const tierColors = ['#8ea2c8', '#40c8ff', '#ff9a2e', '#c65cff'];
   return (
     <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
@@ -403,8 +546,9 @@ const TouchHud: React.FC<{
             <Text style={{ fontSize: 13, color: '#93a6cc' }}>/{hud.total}</Text>
           </Text>
         </View>
-        <TouchableOpacity style={styles.iconButton} onPress={onQuit}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Mettre en pause" style={styles.iconButton} onPress={onPause}>
           <Icon name="pause" size={18} color="#fff" />
+          <Text style={styles.actionText}>PAUSE</Text>
         </TouchableOpacity>
       </View>
 
@@ -425,46 +569,46 @@ const TouchHud: React.FC<{
         {hud.best > 0 && <Text style={styles.bestLap}>Meilleur : {formatLap(hud.best)}</Text>}
       </View>
 
-      {/* commandes */}
-      <View style={styles.controls} pointerEvents="box-none">
+      {/* commandes : démontées pendant la pause pour invalider tout touch encore actif */}
+      {!paused && <View style={styles.controls} pointerEvents="box-none">
         {!gyro && (
           <>
-            <TouchableOpacity
+            <HoldButton
+              accessibilityLabel="Gauche"
               style={[styles.padButton, { left: 18 }]}
-              onPressIn={() => onSteer(-1)}
-              onPressOut={() => onSteer(0)}
+              onHold={onLeft}
             >
               <Icon name="chevronLeft" size={38} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity
+            </HoldButton>
+            <HoldButton
+              accessibilityLabel="Droite"
               style={[styles.padButton, { left: 126 }]}
-              onPressIn={() => onSteer(1)}
-              onPressOut={() => onSteer(0)}
+              onHold={onRight}
             >
               <Icon name="chevronRight" size={38} color="#fff" />
-            </TouchableOpacity>
+            </HoldButton>
           </>
         )}
         <View style={{ flex: 1 }} />
-        <TouchableOpacity
+        <HoldButton
+          accessibilityLabel="Frein"
           style={[styles.actionButton, { backgroundColor: '#ff3d6ecc' }]}
-          onPressIn={() => onBrake(true)}
-          onPressOut={() => onBrake(false)}
+          onHold={onBrake}
         >
           <Icon name="shield" size={22} color="#fff" />
           <Text style={styles.actionText}>FREIN</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
+        </HoldButton>
+        <HoldButton
+          accessibilityLabel="Dérapage"
           style={[styles.actionButton, styles.driftButton]}
-          onPressIn={() => onDrift(true)}
-          onPressOut={() => onDrift(false)}
+          onHold={onDrift}
         >
           <Icon name="drift" size={24} color="#fff" />
           <Text style={styles.actionText}>DÉRAPAGE</Text>
-        </TouchableOpacity>
-      </View>
+        </HoldButton>
+      </View>}
 
-      {hud.countdown > 0 && (
+      {!paused && hud.countdown > 0 && (
         <View style={styles.countdownOverlay} pointerEvents="none">
           <CountdownPulse value={hud.countdown} />
         </View>
@@ -475,6 +619,21 @@ const TouchHud: React.FC<{
     </View>
   );
 };
+
+const PauseMenu: React.FC<{ onResume: () => void; onRestart: () => void; onMenu: () => void }> = ({ onResume, onRestart, onMenu }) => (
+  <View style={styles.pauseOverlay} accessibilityViewIsModal>
+    <Text style={styles.pauseTitle}>PAUSE</Text>
+    <TouchableOpacity accessibilityRole="button" style={styles.pauseAction} onPress={onResume}>
+      <Text style={styles.pauseActionText}>▶  REPRENDRE</Text>
+    </TouchableOpacity>
+    <TouchableOpacity accessibilityRole="button" style={styles.pauseAction} onPress={onRestart}>
+      <Text style={styles.pauseActionText}>↻  RECOMMENCER LA COURSE</Text>
+    </TouchableOpacity>
+    <TouchableOpacity accessibilityRole="button" style={[styles.pauseAction, styles.pauseMenuAction]} onPress={onMenu}>
+      <Text style={styles.pauseActionText}>MENU PRINCIPAL</Text>
+    </TouchableOpacity>
+  </View>
+);
 
 const CountdownPulse: React.FC<{ value: number }> = ({ value }) => {
   const anim = useRef(new Animated.Value(0)).current;
@@ -614,7 +773,7 @@ const styles = StyleSheet.create({
   hudCard: { backgroundColor: '#0a1122cc', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12 },
   hudLabel: { color: '#7f93c8', fontSize: 10, letterSpacing: 2 },
   hudValue: { color: '#fff', fontWeight: '900', fontSize: 24 },
-  iconButton: { marginLeft: 'auto', backgroundColor: '#0a1122cc', padding: 10, borderRadius: 12 },
+  iconButton: { marginLeft: 'auto', minWidth: 58, minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#0a1122e8', paddingHorizontal: 12, borderRadius: 12 },
   speedo: { position: 'absolute', right: 24, bottom: 150, alignItems: 'flex-end' },
   speedValue: { color: '#fff', fontWeight: '900', fontSize: 62, lineHeight: 64 },
   speedUnit: { color: '#8ea2c8', fontSize: 14, letterSpacing: 3, marginTop: -6 },
@@ -652,6 +811,11 @@ const styles = StyleSheet.create({
   },
   driftButton: { backgroundColor: '#2b6bffcc' },
   actionText: { color: '#fff', fontWeight: '800', fontSize: 11, letterSpacing: 1 },
+  pauseOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 30, elevation: 30, backgroundColor: '#070a16ee', alignItems: 'center', justifyContent: 'center', padding: 20, gap: 12 },
+  pauseTitle: { color: '#fff', fontWeight: '900', fontSize: 34, letterSpacing: 4, marginBottom: 6 },
+  pauseAction: { minHeight: 54, minWidth: 250, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 22, borderRadius: 14, backgroundColor: '#16244a', borderWidth: 1, borderColor: '#344a7a' },
+  pauseMenuAction: { backgroundColor: '#121a33' },
+  pauseActionText: { color: '#eaf0ff', fontSize: 15, fontWeight: '900', letterSpacing: 1 },
   countdownOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   countdownText: { color: '#fff', fontSize: 140, fontWeight: '900' },
   boostVignette: {

@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Turbo Karts Arena
 
 Jeu de course de karts arcade 3D, **100 % original**, pour Android (Expo / React Native + three.js).
@@ -58,9 +57,13 @@ framebuffer, puis appelle `gl.endFrameEXP()` à chaque frame.
 | Freiner / marche arrière | `↓` (ou `S`) | bouton FREIN | — |
 | Pause | `P` / `Échap` | bouton ⏸ | — |
 
-**Accélération automatique** : le kart accélère seul. Le seul vrai geste de pilotage
-est le dérapage : maintenu dans un virage, il charge la jauge
-<span>bleu → orange → violet</span>, et le relâchement convertit la charge en turbo.
+**Accélération automatique** : le kart accélère seul. En tactile paysage, le pouce gauche
+maintient GAUCHE/DROITE et le droit peut maintenir FREIN/DÉRAPAGE simultanément.
+PAUSE suspend la simulation (et reprend sans réinitialiser chrono ou tour) ; `P` et
+`Échap` font la même chose sur clavier. Une perte de focus / un changement d'onglet
+met automatiquement la course en pause. En portrait sur le web, un rappel invite à
+tourner l'appareil. Le dérapage maintenu dans un virage charge la jauge
+<span>bleu → orange → violet</span>, puis son relâchement convertit la charge en turbo.
 
 ---
 
@@ -154,7 +157,12 @@ Temps mesurés par les tests : bleu 0,44 s · orange 0,84 s · violet 1,30 s.
   fenêtre glissante autour de l'index courant ;
 * largeur variable (les épingles s'élargissent), dévers dans les virages ;
 * surfaces : route, vibreur, herbe, plaque de turbo ;
-* zones de réapparition automatiques (immobile 2,6 s ou hors piste 5,5 s).
+* zones de réapparition automatiques (immobile 2,6 s ou hors piste 5,5 s) ;
+* largeur demandée augmentée de **25 %** sur les trois circuits. `TrackSample.halfWidth`
+  reste l'unique source pour la chaussée, les bordures, la surface/limite hors-piste,
+  l'IA et le placement du décor. Dans les épingles, un plafond par rayon intérieur
+  limite l'élargissement pour garder 1,8 m d'espace intérieur quand la largeur historique le permet ;
+  les lignes, dénivelés, contrôles et grille de départ restent inchangés.
 
 ### IA
 
@@ -296,16 +304,21 @@ node tools/compress-astc.mjs         # 6×6, qualité 6 → assets/astc/ + manif
 ## 8. Tests
 
 ```bash
-npm test        # 22 tests, sans navigateur
+npm test                 # 25 tests moteur / géométrie / IA, sans navigateur
+npm run test:browser     # scénarios Playwright pause, commandes, orientation et console
+npm run typecheck        # vérifie les types React Native + preview
+npx expo export --platform android --output-dir /tmp/tka-android-export  # bundle Expo Android
 ```
 
 Couvre : convention d'axes (verrouillée — c'est le bug le plus vicieux du projet),
 géométrie des 3 pistes (rayons jouables, pas d'auto-intersection, déterminisme),
 accélération 0-100, vitesse de pointe, freinage, marche arrière, les 3 paliers de
 dérapage, la récompense du turbo, le plafond de vitesse, les collisions (dont
-l'influence de la masse), une course complète en IA sur 2 circuits (3 tours,
+l'influence de la masse), une course complète en IA sur les 3 circuits (3 tours,
 pas de blocage, temps au tour cohérents), le classement, le compte à rebours,
 le formatage des temps, la détection de qualité et l'équilibrage du casting.
+`npm run test:browser` utilise Playwright/Chromium : lance `npx playwright install chromium`
+si le navigateur n'est pas encore installé.
 
 **Conventions verrouillées par les tests** (source de bugs historiques) :
 
@@ -339,6 +352,3 @@ Univers, noms, palettes, tracés et modèles sont **originaux** et créés pour 
 projet : Nova Vex, Bram Krugg, Suki Marlow, Teo Rask, Mara Iron, Glint, Hex Duval,
 Zera Kwon ; les circuits Côte Solaire, Canyon Écarlate et Néon Nuit.
 Aucune référence, asset, nom ou mécanique déposée d'une franchise existante.
-=======
-# Turbokartsarena
->>>>>>> a4abad20cf45fa729e163cf58f330a7b76a00fdf

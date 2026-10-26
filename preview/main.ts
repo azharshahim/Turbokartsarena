@@ -11,6 +11,7 @@ import { CIRCUITS } from '../src/game/circuits';
 import { ROSTER } from '../src/game/roster';
 import { autoQuality, QUALITY, type QualityLevel } from '../src/core/config';
 import { formatLap, formatTime } from '../src/core/race';
+import { MultiTouchControls, type TouchAction } from '../src/core/touchControls';
 
 const $ = (id: string) => document.getElementById(id)!;
 const state = {
@@ -23,12 +24,16 @@ const state = {
   showFps: false,
   paused: false,
   screen: 'menu' as 'menu' | 'race' | 'results',
+  starting: false,
 };
 
 let engine: PhysicsEngine | null = null;
 let rafId = 0;
 const keys = new Set<string>();
-const touch = { steer: 0, drift: false, brake: false };
+const touch = { steer: 0, drift: false, brake: false }; // synthetic input used by the capture harness
+const touchPointers = new MultiTouchControls();
+const pointerTargets = new Map<number, HTMLElement>();
+let finishTimeout = 0;
 const gyro = { enabled: false, rest: 0, angle: 0, active: false };
 
 /* ------------------------------------------------------------------ */
@@ -77,18 +82,20 @@ function startEngine() {
     profile: ROSTER[state.driverIndex],
     laps: state.laps,
     onFinish: () => {
-      setTimeout(showResults, 1400);
+      window.clearTimeout(finishTimeout);
+      finishTimeout = window.setTimeout(() => {
+        if (!state.paused) showResults();
+      }, 1400);
     },
   });
 
   buildMinimap();
-  loop(performance.now());
+  engine.resetFrameClock();
+  rafId = requestAnimationFrame(loop);
 }
 
 function loop(t: number) {
-  rafId = requestAnimationFrame(loop);
-  if (!engine) return;
-  if (state.paused) return;
+  if (!engine || state.paused || state.screen !== 'race') return;
   engine.setInput({
     steer: currentSteer(),
     drift: currentDrift(),
@@ -97,10 +104,11 @@ function loop(t: number) {
   });
   engine.frame(t);
   updateHud();
+  rafId = requestAnimationFrame(loop);
 }
 
 function currentSteer() {
-  let s = touch.steer;
+  let s = touchPointers.steer || touch.steer;
   if (keys.has('ArrowLeft') || keys.has('q') || keys.has('a')) s = -1;
   if (keys.has('ArrowRight') || keys.has('d')) s = 1;
   if (state.input === 'gyro' && gyro.active) {
@@ -108,8 +116,8 @@ function currentSteer() {
   }
   return s;
 }
-const currentDrift = () => touch.drift || keys.has(' ') || keys.has('Shift');
-const currentBrake = () => touch.brake || keys.has('ArrowDown') || keys.has('s');
+const currentDrift = () => touchPointers.drift || touch.drift || keys.has(' ') || keys.has('Shift');
+const currentBrake = () => touchPointers.brake || touch.brake || keys.has('ArrowDown') || keys.has('s');
 
 /* ------------------------------------------------------------------ */
 /* HUD                                                                */
@@ -235,11 +243,16 @@ function renderMenu() {
   $('soundToggle').textContent = state.sound ? '🔊 Son' : '🔇 Muet';
   $('fpsToggle').textContent = state.showFps ? '📊 FPS activé' : '📊 FPS';
   $('fpsBadge').classList.toggle('on', state.showFps);
+  document.body.classList.toggle('gyro-on', state.input === 'gyro');
 }
 
 function showMenu() {
   state.screen = 'menu';
+  state.paused = false;
+  state.starting = false;
+  clearHeldInputs();
   cancelAnimationFrame(rafId);
+  window.clearTimeout(finishTimeout);
   engine?.dispose();
   engine = null;
   $('stage').innerHTML = '';
@@ -247,27 +260,45 @@ function showMenu() {
   $('results').classList.add('hidden');
   $('pause').classList.add('hidden');
   $('hud').classList.remove('live');
+  document.body.classList.remove('racing');
   renderMenu();
 }
 
 function startRace() {
+  if (state.starting || state.screen === 'race') return;
+  state.starting = true;
+  clearHeldInputs();
+  cancelAnimationFrame(rafId);
+  window.clearTimeout(finishTimeout);
+  engine?.dispose();
+  engine = null;
   state.screen = 'race';
   state.paused = false;
+  document.body.classList.add('racing');
   $('menu').classList.add('hidden');
   $('results').classList.add('hidden');
   $('pause').classList.add('hidden');
   $('hud').classList.add('live');
   $('loading').classList.remove('hidden');
   // laisse le navigateur peindre le loader avant de générer les textures
-  setTimeout(() => {
-    startEngine();
-    $('loading').classList.add('hidden');
+  window.setTimeout(() => {
+    try {
+      startEngine();
+    } finally {
+      state.starting = false;
+      $('loading').classList.add('hidden');
+    }
   }, 60);
 }
 
 function showResults() {
-  if (!engine) return;
+  if (!engine || state.screen !== 'race') return;
   state.screen = 'results';
+  state.paused = false;
+  clearHeldInputs();
+  cancelAnimationFrame(rafId);
+  $('pause').classList.add('hidden');
+  document.body.classList.remove('racing');
   const p = engine.player.state;
   $('results').classList.remove('hidden');
   $('hud').classList.remove('live');
@@ -283,6 +314,8 @@ function showResults() {
     ),
   ];
   $('resultCard').innerHTML = rows.join('');
+  engine.dispose();
+  engine = null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -347,41 +380,83 @@ bind('restartBtn', 'click', () => {
   engine?.restart();
 });
 bind('quitBtn', 'click', showMenu);
-bind('pauseBtn', 'click', () => togglePause(!state.paused));
+bind('pauseBtn', 'click', () => togglePause(true));
 
-/* boutons tactiles */
-const hold = (id: string, down: () => void, up: () => void) => {
+/* état neutre garanti après pause, perte de focus ou annulation tactile */
+function clearHeldInputs() {
+  keys.clear();
+  touchPointers.clear();
+  touch.steer = 0;
+  touch.drift = false;
+  touch.brake = false;
+  const captures = Array.from(pointerTargets.entries());
+  pointerTargets.clear();
+  for (const [pointerId, element] of captures) {
+    element.classList.remove('active');
+    try {
+      if (element.hasPointerCapture(pointerId)) element.releasePointerCapture(pointerId);
+    } catch { /* le navigateur a déjà annulé la capture */ }
+  }
+  gyro.rest = gyro.angle;
+}
+
+/* commandes Pointer Events avec capture : plusieurs doigts restent indépendants */
+const hold = (id: string, action: TouchAction) => {
   const el = $(id);
-  const start = (e: Event) => {
+  const start = (event: Event) => {
+    const e = event as PointerEvent;
+    if (state.screen !== 'race' || state.paused || (e.pointerType === 'mouse' && e.button !== 0)) return;
     e.preventDefault();
-    (e.currentTarget as HTMLElement).classList.add('active');
-    down();
+    const target = e.currentTarget as HTMLElement;
+    try { target.setPointerCapture(e.pointerId); } catch { /* capture facultative */ }
+    touchPointers.press(e.pointerId, action);
+    pointerTargets.set(e.pointerId, target);
+    target.classList.add('active');
   };
-  const end = (e: Event) => {
-    (e.currentTarget as HTMLElement).classList.remove('active');
-    up();
+  const end = (event: Event) => {
+    const e = event as PointerEvent;
+    e.preventDefault();
+    const target = pointerTargets.get(e.pointerId);
+    if (!target) return;
+    touchPointers.release(e.pointerId);
+    pointerTargets.delete(e.pointerId);
+    if (![...pointerTargets.values()].includes(target)) target.classList.remove('active');
   };
   el.addEventListener('pointerdown', start);
   el.addEventListener('pointerup', end);
   el.addEventListener('pointercancel', end);
-  el.addEventListener('pointerleave', end);
+  el.addEventListener('lostpointercapture', end);
 };
-hold('leftBtn', () => (touch.steer = -1), () => (touch.steer = 0));
-hold('rightBtn', () => (touch.steer = 1), () => (touch.steer = 0));
-hold('driftBtn', () => (touch.drift = true), () => (touch.drift = false));
-hold('brakeBtn', () => (touch.brake = true), () => (touch.brake = false));
+hold('leftBtn', 'left');
+hold('rightBtn', 'right');
+hold('driftBtn', 'drift');
+hold('brakeBtn', 'brake');
 
 /* clavier */
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
-    if (state.screen === 'race') togglePause(!state.paused);
+    if (!e.repeat && state.screen === 'race') togglePause(!state.paused);
     return;
   }
+  if (e.key === 'Enter' && state.screen === 'menu' && !e.repeat) {
+    startRace();
+    return;
+  }
+  if (state.screen !== 'race' || state.paused || e.repeat) return;
   if (e.key === ' ') e.preventDefault();
   keys.add(e.key);
-  if (e.key === 'Enter' && state.screen === 'menu') startRace();
 });
 window.addEventListener('keyup', (e) => keys.delete(e.key));
+window.addEventListener('blur', () => {
+  clearHeldInputs();
+  if (state.screen === 'race') togglePause(true);
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    clearHeldInputs();
+    if (state.screen === 'race') togglePause(true);
+  }
+});
 
 /* gyroscope */
 async function enableGyro() {
@@ -408,11 +483,23 @@ async function enableGyro() {
 }
 
 function togglePause(v: boolean) {
+  if (state.screen !== 'race' || !engine || state.paused === v) return;
   state.paused = v;
+  clearHeldInputs();
+  engine.resetFrameClock();
   $('pause').classList.toggle('hidden', !v);
-  if (v && engine) {
+  if (v) {
+    cancelAnimationFrame(rafId);
+    rafId = 0;
+    if (engine.race.phase === 'finished') window.clearTimeout(finishTimeout);
     const s = engine.stats;
     $('pauseStats').textContent = `${s.fps} FPS · ${s.particles} particules · rendu ×${s.pixelRatio.toFixed(2)} · qualité ${engine.quality.level}`;
+  } else {
+    if (engine.race.phase === 'finished') {
+      window.clearTimeout(finishTimeout);
+      finishTimeout = window.setTimeout(showResults, 1400);
+    }
+    rafId = requestAnimationFrame(loop);
   }
 }
 
@@ -435,6 +522,10 @@ $('loading').classList.add('hidden');
   },
   engine: () => engine,
   state,
+  togglePause,
+  currentSteer,
+  currentDrift,
+  currentBrake,
   skipCountdown: () => {
     if (engine) (engine.race as any).countdown = 0.01;
   },
@@ -456,7 +547,7 @@ $('loading').classList.add('hidden');
   },
   /** Rend exactement N frames de durée fixe (captures déterministes). */
   step: (n = 1, dtMs = 16.67) => {
-    if (!engine) return;
+    if (!engine || state.paused) return;
     let t = performance.now();
     for (let i = 0; i < n; i++) {
       t += dtMs;

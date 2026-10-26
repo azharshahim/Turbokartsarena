@@ -1,8 +1,8 @@
 /**
  * Compile la preview navigateur.
  *  • preview/dist/            → version "serveur de dev" (modules séparés)
- *  • dist/turbo-karts-arena.html → FICHIER UNIQUE autonome : JS inline, aucune
- *    requête réseau, fonctionne en file:// et dans une iframe sandboxée.
+ *  • dist/turbo-karts-arena.html → FICHIER UNIQUE autonome
+ *  • index.html → copie déployable GitHub Pages de ce même bundle autonome.
  */
 import * as esbuild from 'esbuild';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -46,6 +46,8 @@ const single = html
     () => `<script type="module">\n${js}\n</script>`,
   );
 writeFileSync('dist/turbo-karts-arena.html', single);
+writeFileSync('index.html', single);
 const kb = (single.length / 1024).toFixed(0);
 console.log(`\n✅ dist/turbo-karts-arena.html (${kb} Ko, autonome, hors ligne)`);
 console.log('✅ preview/dist/index.html (build de dev)');
+console.log('✅ index.html (bundle déployable GitHub Pages)');

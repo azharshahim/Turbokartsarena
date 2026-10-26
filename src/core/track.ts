@@ -27,6 +27,8 @@ export interface TrackLayout {
   width: number;
   /** Variation de largeur (m) : les épingles s'élargissent. */
   widthVariance: number;
+  /** Multiplicateur de largeur; les virages restent limités par leur rayon intérieur. */
+  widthScale?: number;
   /** Zones de turbo posées sur la piste : [progression 0..1, offset latéral -1..1, longueur]. */
   boosts: Array<[number, number, number]>;
   /** Nombre de stands / tribunes le long du circuit. */
@@ -160,8 +162,17 @@ export class Track {
       // largeur : épingles plus larges (utile pour la jouabilité), lignes droites plus fines
       const bend = smoothstep(0.004, 0.038, Math.abs(this.samples[i].curvature));
       const wobble = Math.sin(i * 0.11) * 0.5 + Math.sin(i * 0.037 + 1.7) * 0.5;
-      this.samples[i].halfWidth =
-        layout.width * 0.5 + layout.widthVariance * (bend * 0.85 + wobble * 0.25);
+      const baseHalfWidth = layout.width * 0.5 + layout.widthVariance * (bend * 0.85 + wobble * 0.25);
+      const requestedHalfWidth = baseHalfWidth * (layout.widthScale ?? 1);
+      // Le multiplicateur ne doit pas franchir le rayon intérieur minimal
+      // (1,8 m) là où la largeur de base le permet. Si la largeur historique
+      // est déjà au-dessus de ce plafond, on la conserve plutôt que de réduire
+      // la route ou d'aggraver le chevauchement existant.
+      const radius = Math.abs(this.samples[i].curvature) > 1e-4
+        ? 1 / Math.abs(this.samples[i].curvature)
+        : Infinity;
+      const safeHalfWidth = Math.max(baseHalfWidth, radius - 1.8);
+      this.samples[i].halfWidth = Math.min(requestedHalfWidth, safeHalfWidth);
       // dévers dans les virages
       this.samples[i].bank = clamp(this.samples[i].curvature * 3.2, -0.09, 0.09);
     }

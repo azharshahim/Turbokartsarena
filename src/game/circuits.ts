@@ -119,6 +119,7 @@ export const CIRCUITS: Circuit[] = [
     seed: 1337,
     width: 17,
     widthVariance: 5.5,
+    widthScale: 1.25,
     maxCurvature: 0.05,
     grandstands: 3,
     boosts: [
@@ -155,6 +156,7 @@ export const CIRCUITS: Circuit[] = [
     seed: 90210,
     width: 15.5,
     widthVariance: 6.5,
+    widthScale: 1.25,
     maxCurvature: 0.048,
     grandstands: 2,
     boosts: [
@@ -193,6 +195,7 @@ export const CIRCUITS: Circuit[] = [
     seed: 424242,
     width: 18,
     widthVariance: 4.5,
+    widthScale: 1.25,
     maxCurvature: 0.052,
     grandstands: 4,
     boosts: [

@@ -33,7 +33,7 @@
     "web": {
       "bundler": "metro"
     },
-    "plugins": ["expo-sensors"],
+    "plugins": ["expo-sensors", "expo-asset"],
     "experiments": {
       "tsconfigPaths": true
     },

@@ -295,6 +295,11 @@ export class PhysicsEngine {
     return this.race.player;
   }
 
+  /** Réinitialise l'horloge de rendu après une suspension, sans toucher à la course. */
+  resetFrameClock() {
+    this.lastTime = 0;
+  }
+
   restart() {
     this.race.reset();
     this.race.phase = 'countdown';
