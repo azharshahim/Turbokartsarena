@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Turbo Karts Arena
 
 Jeu de course de karts arcade 3D, **100 % original**, pour Android (Expo / React Native + three.js).
@@ -338,3 +339,6 @@ Univers, noms, palettes, tracés et modèles sont **originaux** et créés pour 
 projet : Nova Vex, Bram Krugg, Suki Marlow, Teo Rask, Mara Iron, Glint, Hex Duval,
 Zera Kwon ; les circuits Côte Solaire, Canyon Écarlate et Néon Nuit.
 Aucune référence, asset, nom ou mécanique déposée d'une franchise existante.
+=======
+# Turbokartsarena
+>>>>>>> a4abad20cf45fa729e163cf58f330a7b76a00fdf
