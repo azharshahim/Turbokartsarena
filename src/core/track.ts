@@ -142,6 +142,10 @@ export class Track {
     // --- 2e passage : courbure signée dans la convention du cap du kart ---
     //   curvature > 0  ⇒  la piste tourne à GAUCHE
     //   (heading = atan2(tx, tz) ; un cap qui augmente = virage à gauche)
+    const widthScale = layout.widthScale ?? 1;
+    const baseHalfWidths = new Float64Array(count);
+    const widthCaps = new Float64Array(count);
+
     for (let i = 0; i < count; i++) {
       const a = resampled[(i - 2 + count) % count];
       const p = resampled[i];
@@ -163,18 +167,59 @@ export class Track {
       const bend = smoothstep(0.004, 0.038, Math.abs(this.samples[i].curvature));
       const wobble = Math.sin(i * 0.11) * 0.5 + Math.sin(i * 0.037 + 1.7) * 0.5;
       const baseHalfWidth = layout.width * 0.5 + layout.widthVariance * (bend * 0.85 + wobble * 0.25);
-      const requestedHalfWidth = baseHalfWidth * (layout.widthScale ?? 1);
-      // Le multiplicateur ne doit pas franchir le rayon intérieur minimal
-      // (1,8 m) là où la largeur de base le permet. Si la largeur historique
-      // est déjà au-dessus de ce plafond, on la conserve plutôt que de réduire
-      // la route ou d'aggraver le chevauchement existant.
-      const radius = Math.abs(this.samples[i].curvature) > 1e-4
-        ? 1 / Math.abs(this.samples[i].curvature)
-        : Infinity;
-      const safeHalfWidth = Math.max(baseHalfWidth, radius - 1.8);
-      this.samples[i].halfWidth = Math.min(requestedHalfWidth, safeHalfWidth);
+      baseHalfWidths[i] = baseHalfWidth;
+      this.samples[i].halfWidth = baseHalfWidth;
       // dévers dans les virages
       this.samples[i].bank = clamp(this.samples[i].curvature * 3.2, -0.09, 0.09);
+    }
+
+    if (widthScale !== 1) {
+      // Le multiplicateur ne doit ni franchir le rayon géométrique réel de
+      // courbure (1,8 m de marge intérieure), ni faire se chevaucher les deux
+      // branches opposées d'une épingle (3,6 m pour vibreurs + séparation).
+      // Si la largeur historique est déjà au-dessus de ce plafond, on la
+      // conserve plutôt que de réduire la route ou d'aggraver un pli existant.
+      for (let i = 0; i < count; i++) {
+        let trueRadius = Infinity;
+        for (const d of [1, 2, 3]) {
+          const a = resampled[(i - d + count) % count];
+          const p = resampled[i];
+          const b = resampled[(i + d) % count];
+          const ux = p.x - a.x;
+          const uz = p.z - a.z;
+          const vx = b.x - p.x;
+          const vz = b.z - p.z;
+          const wx = b.x - a.x;
+          const wz = b.z - a.z;
+          const cross = Math.abs(ux * vz - uz * vx);
+          if (cross > 1e-5) {
+            const r = (Math.hypot(ux, uz) * Math.hypot(vx, vz) * Math.hypot(wx, wz)) / (2 * cross);
+            if (r < trueRadius) trueRadius = r;
+          }
+        }
+        let chordCap = Infinity;
+        const si = this.samples[i];
+        for (let j = 0; j < count; j++) {
+          const circ = Math.min(Math.abs(j - i), count - Math.abs(j - i));
+          if (circ < 10) continue;
+          const sj = this.samples[j];
+          if (si.tx * sj.tx + si.tz * sj.tz > 0.2) continue;
+          const gapCap = (Math.hypot(si.x - sj.x, si.z - sj.z) - 3.6) * 0.5;
+          if (gapCap < chordCap) chordCap = gapCap;
+        }
+        const baseHalfWidth = baseHalfWidths[i];
+        const requestedHalfWidth = baseHalfWidth * widthScale;
+        const safeHalfWidth = Math.max(baseHalfWidth, Math.min(trueRadius - 1.8, chordCap));
+        widthCaps[i] = Math.min(requestedHalfWidth, safeHalfWidth);
+        this.samples[i].halfWidth = widthCaps[i];
+      }
+      for (let pass = 0; pass < 4; pass++) {
+        const prev = this.samples.map((s) => s.halfWidth);
+        for (let i = 0; i < count; i++) {
+          const avg = (prev[(i - 1 + count) % count] + prev[i] * 2 + prev[(i + 1) % count]) * 0.25;
+          this.samples[i].halfWidth = clamp(avg, Math.min(baseHalfWidths[i], widthCaps[i]), widthCaps[i]);
+        }
+      }
     }
 
     // 4) Zones de boost

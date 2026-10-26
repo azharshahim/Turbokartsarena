@@ -33,6 +33,12 @@ import { CIRCUITS, type Circuit } from './src/game/circuits';
 import { ROSTER, type KartProfile } from './src/game/roster';
 import { autoQuality, QUALITY, type QualityLevel } from './src/core/config';
 import { formatLap, formatTime } from './src/core/race';
+import {
+  TouchZoneController,
+  type TouchPointSample,
+  type TouchZoneId,
+  type TouchZoneRect,
+} from './src/core/touchControls';
 import Icon from './src/ui/icons';
 
 type Screen = 'menu' | 'race' | 'results';
@@ -46,75 +52,192 @@ interface Settings {
 
 const DEFAULT_SETTINGS: Settings = { quality: 'auto', gyro: false, sound: true, laps: 3 };
 
-export default function App() {
-  const [screen, setScreen] = useState<Screen>('menu');
-  const [paused, setPaused] = useState(false);
-  const [circuitIndex, setCircuitIndex] = useState(0);
-  const [profileIndex, setProfileIndex] = useState(0);
-  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [hud, setHud] = useState({
+type HeldButtons = { left: boolean; right: boolean; drift: boolean; brake: boolean };
+const EMPTY_HELD: HeldButtons = { left: false, right: false, drift: false, brake: false };
+
+function makeInitialHud(laps: number) {
+  return {
     speed: 0,
     tier: 0,
     charge: 0,
     boosting: false,
     lap: 1,
-    laps: 3,
+    laps,
     place: 1,
     total: 6,
     time: 0,
     countdown: 0,
     best: 0,
     results: null as null | { place: number; time: number; laps: number[] },
-  });
+  };
+}
+
+function extractTouchSamples(list: any, fallback?: any): TouchPointSample[] {
+  if (Array.isArray(list) || (list && typeof list.length === 'number')) {
+    return Array.from(list, (t: any, idx: number) => ({
+      identifier: Number.isFinite(Number(t?.identifier)) ? Number(t.identifier) : idx,
+      pageX: Number(t?.pageX ?? 0),
+      pageY: Number(t?.pageY ?? 0),
+    }));
+  }
+  if (fallback && Number.isFinite(Number(fallback.pageX)) && Number.isFinite(Number(fallback.pageY))) {
+    return [
+      {
+        identifier: Number.isFinite(Number(fallback.identifier)) ? Number(fallback.identifier) : 0,
+        pageX: Number(fallback.pageX),
+        pageY: Number(fallback.pageY),
+      },
+    ];
+  }
+  return [];
+}
+
+export default function App() {
+  const [screen, setScreen] = useState<Screen>('menu');
+  const [paused, setPaused] = useState(false);
+  const [pressedButtons, setPressedButtons] = useState<HeldButtons>(EMPTY_HELD);
+  const [circuitIndex, setCircuitIndex] = useState(0);
+  const [profileIndex, setProfileIndex] = useState(0);
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [hud, setHud] = useState(() => makeInitialHud(DEFAULT_SETTINGS.laps));
 
   const engineRef = useRef<PhysicsEngine | null>(null);
-  const inputRef = useRef({ left: false, right: false, drift: false, brake: false });
+  const screenRef = useRef<Screen>('menu');
+  const raceSessionRef = useRef(0);
+  const touchControllerRef = useRef(new TouchZoneController());
+  const inputRef = useRef<HeldButtons>({ ...EMPTY_HELD });
   const pausedRef = useRef(false);
   const rafRef = useRef<number | null>(null);
   const frameLoopRef = useRef<((t: number) => void) | null>(null);
-  const resultsTimeoutRef = useRef<any>(null);
+  const resultsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gyroRef = useRef({ angle: 0, rest: 0, enabled: false });
-  const hudTimer = useRef<any>(null);
+  const hudTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  screenRef.current = screen;
+
+  const syncTouchInputs = useCallback(() => {
+    const c = touchControllerRef.current.controls;
+    const next: HeldButtons = {
+      left: c.isDown('left'),
+      right: c.isDown('right'),
+      drift: c.drift,
+      brake: c.brake,
+    };
+    inputRef.current = next;
+    setPressedButtons((prev) =>
+      prev.left === next.left &&
+      prev.right === next.right &&
+      prev.drift === next.drift &&
+      prev.brake === next.brake
+        ? prev
+        : next,
+    );
+  }, []);
 
   const clearHeldInputs = useCallback(() => {
-    inputRef.current = { left: false, right: false, drift: false, brake: false };
+    touchControllerRef.current.clear();
+    inputRef.current = { ...EMPTY_HELD };
+    setPressedButtons((prev) =>
+      prev.left || prev.right || prev.drift || prev.brake ? EMPTY_HELD : prev,
+    );
     gyroRef.current.rest = gyroRef.current.angle;
+    engineRef.current?.setInput({ steer: 0, drift: false, brake: false, throttle: 1 });
   }, []);
 
   const stopFrameLoop = useCallback(() => {
-    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-    rafRef.current = null;
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
   }, []);
 
+  const startFrameLoop = useCallback(() => {
+    stopFrameLoop();
+    if (!engineRef.current || pausedRef.current || screenRef.current !== 'race' || !frameLoopRef.current) {
+      return;
+    }
+    rafRef.current = requestAnimationFrame(frameLoopRef.current);
+  }, [stopFrameLoop]);
+
+  const stopTimers = useCallback(() => {
+    if (hudTimer.current !== null) {
+      clearInterval(hudTimer.current);
+      hudTimer.current = null;
+    }
+    if (resultsTimeoutRef.current !== null) {
+      clearTimeout(resultsTimeoutRef.current);
+      resultsTimeoutRef.current = null;
+    }
+  }, []);
+
+  const scheduleResultsTransition = useCallback(
+    (targetEngine: PhysicsEngine) => {
+      if (hudTimer.current !== null) {
+        clearInterval(hudTimer.current);
+        hudTimer.current = null;
+      }
+      const p = targetEngine.race.player;
+      const finalResults = {
+        place: p.state.place,
+        time: p.state.finishTime,
+        laps: [...p.state.lapTimes],
+      };
+      setHud((current) => ({
+        ...current,
+        speed: Math.round(p.kmh),
+        tier: p.state.driftTier,
+        charge: p.driftChargeRatio,
+        boosting: p.isBoosting,
+        place: p.state.place,
+        total: targetEngine.race.karts.length,
+        time: targetEngine.race.raceTime,
+        countdown: 0,
+        best: p.state.bestLapTime,
+        results: finalResults,
+      }));
+      if (resultsTimeoutRef.current !== null) clearTimeout(resultsTimeoutRef.current);
+      resultsTimeoutRef.current = setTimeout(() => {
+        resultsTimeoutRef.current = null;
+        if (engineRef.current !== targetEngine || pausedRef.current || screenRef.current !== 'race') return;
+        raceSessionRef.current += 1;
+        clearHeldInputs();
+        stopFrameLoop();
+        frameLoopRef.current = null;
+        targetEngine.dispose();
+        engineRef.current = null;
+        screenRef.current = 'results';
+        setHud((current) => ({ ...current, results: finalResults }));
+        setScreen('results');
+      }, 1600);
+    },
+    [clearHeldInputs, stopFrameLoop],
+  );
+
   const pauseRace = useCallback(() => {
-    if (pausedRef.current) return;
     clearHeldInputs();
+    if (pausedRef.current || screenRef.current !== 'race') return;
     pausedRef.current = true;
     engineRef.current?.resetFrameClock();
-    if (resultsTimeoutRef.current) clearTimeout(resultsTimeoutRef.current);
-    resultsTimeoutRef.current = null;
+    if (resultsTimeoutRef.current !== null) {
+      clearTimeout(resultsTimeoutRef.current);
+      resultsTimeoutRef.current = null;
+    }
     stopFrameLoop();
     setPaused(true);
   }, [clearHeldInputs, stopFrameLoop]);
 
   const resumeRace = useCallback(() => {
-    if (!pausedRef.current) return;
+    if (!pausedRef.current || screenRef.current !== 'race') return;
     const engine = engineRef.current;
     clearHeldInputs();
     pausedRef.current = false;
     engine?.resetFrameClock();
     setPaused(false);
     if (engine?.race.phase === 'finished') {
-      resultsTimeoutRef.current = setTimeout(() => {
-        if (!engine || engineRef.current !== engine || pausedRef.current) return;
-        stopFrameLoop();
-        engine.dispose();
-        engineRef.current = null;
-        setScreen('results');
-      }, 1600);
+      scheduleResultsTransition(engine);
     }
-    if (engine && frameLoopRef.current) rafRef.current = requestAnimationFrame(frameLoopRef.current);
-  }, [clearHeldInputs, stopFrameLoop]);
+    startFrameLoop();
+  }, [clearHeldInputs, scheduleResultsTransition, startFrameLoop]);
 
   /* ---------------- gyroscope ---------------- */
   useEffect(() => {
@@ -141,11 +264,15 @@ export default function App() {
 
   /* ---------------- boucle de HUD ---------------- */
   const startHudLoop = useCallback(() => {
-    if (hudTimer.current) clearInterval(hudTimer.current);
+    if (hudTimer.current !== null) clearInterval(hudTimer.current);
     hudTimer.current = setInterval(() => {
       const e = engineRef.current;
-      if (!e || pausedRef.current) return;
+      if (!e || pausedRef.current || screenRef.current !== 'race') return;
       const race = e.race;
+      if (race.phase === 'finished') {
+        scheduleResultsTransition(e);
+        return;
+      }
       const p = race.player;
       setHud({
         speed: Math.round(p.kmh),
@@ -159,40 +286,56 @@ export default function App() {
         time: race.raceTime,
         countdown: race.phase === 'countdown' ? Math.max(0, Math.ceil(race.countdown)) : 0,
         best: p.state.bestLapTime,
-        results:
-          race.phase === 'finished'
-            ? { place: p.state.place, time: p.state.finishTime, laps: p.state.lapTimes }
-            : null,
+        results: null,
       });
-      if (race.phase === 'finished') {
-        clearInterval(hudTimer.current);
-        hudTimer.current = null;
-        if (resultsTimeoutRef.current) clearTimeout(resultsTimeoutRef.current);
-        resultsTimeoutRef.current = setTimeout(() => {
-          if (engineRef.current !== e || pausedRef.current) return;
-          stopFrameLoop();
-          e.dispose();
-          engineRef.current = null;
-          setScreen('results');
-        }, 1600);
-      }
     }, 66);
-  }, [settings.laps, stopFrameLoop]);
+  }, [settings.laps, scheduleResultsTransition]);
 
-  useEffect(() => () => {
-    if (hudTimer.current) clearInterval(hudTimer.current);
-    if (resultsTimeoutRef.current) clearTimeout(resultsTimeoutRef.current);
-    stopFrameLoop();
-    engineRef.current?.dispose();
-    engineRef.current = null;
-  }, [stopFrameLoop]);
+  const restartCurrentRace = useCallback(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    if (resultsTimeoutRef.current !== null) {
+      clearTimeout(resultsTimeoutRef.current);
+      resultsTimeoutRef.current = null;
+    }
+    clearHeldInputs();
+    engine.restart();
+    engine.resetFrameClock();
+    setHud({
+      ...makeInitialHud(settings.laps),
+      total: engine.race.karts.length,
+      countdown: Math.max(0, Math.ceil(engine.race.countdown)),
+    });
+    startHudLoop();
+    if (pausedRef.current) {
+      resumeRace();
+    } else {
+      startFrameLoop();
+    }
+  }, [clearHeldInputs, resumeRace, settings.laps, startFrameLoop, startHudLoop]);
+
+  useEffect(
+    () => () => {
+      raceSessionRef.current += 1;
+      stopTimers();
+      stopFrameLoop();
+      frameLoopRef.current = null;
+      touchControllerRef.current.clear();
+      engineRef.current?.dispose();
+      engineRef.current = null;
+    },
+    [stopFrameLoop, stopTimers],
+  );
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
-      if (nextState !== 'active' && screen === 'race') pauseRace();
+      clearHeldInputs();
+      if (nextState !== 'active' && screenRef.current === 'race') {
+        pauseRace();
+      }
     });
     return () => subscription.remove();
-  }, [screen, pauseRace]);
+  }, [clearHeldInputs, pauseRace]);
 
   /* ---------------- démarrage / GLView ---------------- */
   const circuit: Circuit = CIRCUITS[circuitIndex];
@@ -200,6 +343,7 @@ export default function App() {
 
   const onContextCreate = useCallback(
     async (gl: any) => {
+      const sessionId = raceSessionRef.current;
       const native = Platform.OS !== 'web';
       const rendererName = (() => {
         try {
@@ -225,6 +369,17 @@ export default function App() {
         const h = gl.drawingBufferHeight || 720;
         resolve({ width: w, height: h });
       });
+
+      if (raceSessionRef.current !== sessionId || screenRef.current !== 'race') {
+        return;
+      }
+
+      stopFrameLoop();
+      if (engineRef.current) {
+        engineRef.current.dispose();
+        engineRef.current = null;
+      }
+
       const engine = new PhysicsEngine({
         gl,
         canvas: null,
@@ -237,14 +392,19 @@ export default function App() {
         laps: settings.laps,
         onFrame: () => undefined,
       });
-      engine.onFinish = () => startHudLoop();
+      engine.onFinish = () => {
+        if (engineRef.current === engine && !pausedRef.current && screenRef.current === 'race') {
+          scheduleResultsTransition(engine);
+        }
+      };
       engineRef.current = engine;
+      engine.resetFrameClock();
       startHudLoop();
 
       // boucle de rendu pilotée par requestAnimationFrame (expo-gl l'expose)
       const loop = (t: number) => {
-        if (engineRef.current !== engine || pausedRef.current) {
-          rafRef.current = null;
+        rafRef.current = null;
+        if (engineRef.current !== engine || pausedRef.current || screenRef.current !== 'race') {
           return;
         }
         const i = inputRef.current;
@@ -256,32 +416,101 @@ export default function App() {
         }
         engine.setInput({ steer, drift: i.drift, brake: i.brake, throttle: 1 });
         engine.frame(t);
-        rafRef.current = requestAnimationFrame(loop);
+        if (engineRef.current === engine && !pausedRef.current && screenRef.current === 'race') {
+          if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+          rafRef.current = requestAnimationFrame(loop);
+        }
       };
       frameLoopRef.current = loop;
-      rafRef.current = requestAnimationFrame(loop);
+      if (!pausedRef.current) {
+        startFrameLoop();
+      }
     },
-    [circuit, profile, settings, startHudLoop],
+    [circuit, profile, scheduleResultsTransition, settings, startFrameLoop, startHudLoop, stopFrameLoop],
   );
 
-  const startRace = () => {
+  const startRace = useCallback(() => {
+    raceSessionRef.current += 1;
+    clearHeldInputs();
+    stopTimers();
+    stopFrameLoop();
+    frameLoopRef.current = null;
+    if (engineRef.current) {
+      engineRef.current.dispose();
+      engineRef.current = null;
+    }
+    pausedRef.current = false;
+    setPaused(false);
+    setHud(makeInitialHud(settings.laps));
+    screenRef.current = 'race';
     setScreen('race');
-  };
+  }, [clearHeldInputs, settings.laps, stopFrameLoop, stopTimers]);
 
-  const quitRace = () => {
+  const quitRace = useCallback(() => {
+    raceSessionRef.current += 1;
     clearHeldInputs();
     pausedRef.current = false;
     setPaused(false);
     stopFrameLoop();
     frameLoopRef.current = null;
-    if (hudTimer.current) clearInterval(hudTimer.current);
-    hudTimer.current = null;
-    if (resultsTimeoutRef.current) clearTimeout(resultsTimeoutRef.current);
-    resultsTimeoutRef.current = null;
+    stopTimers();
     engineRef.current?.dispose();
     engineRef.current = null;
+    setHud(makeInitialHud(settings.laps));
+    screenRef.current = 'menu';
     setScreen('menu');
-  };
+  }, [clearHeldInputs, settings.laps, stopFrameLoop, stopTimers]);
+
+  const setZoneRect = useCallback(
+    (id: TouchZoneId, rect: TouchZoneRect | null) => {
+      touchControllerRef.current.setZone(id, rect);
+      syncTouchInputs();
+    },
+    [syncTouchInputs],
+  );
+
+  const handleRaceTouchStart = useCallback(
+    (event: any) => {
+      if (pausedRef.current || screenRef.current !== 'race') return;
+      const ne = event?.nativeEvent;
+      const changed = extractTouchSamples(ne?.changedTouches, ne);
+      const all = ne?.touches ? extractTouchSamples(ne.touches) : undefined;
+      const result = touchControllerRef.current.handleTouchStart(changed, all);
+      syncTouchInputs();
+      if (result === 'pause') {
+        pauseRace();
+      }
+    },
+    [pauseRace, syncTouchInputs],
+  );
+
+  const handleRaceTouchMove = useCallback(
+    (event: any) => {
+      if (pausedRef.current || screenRef.current !== 'race') return;
+      const ne = event?.nativeEvent;
+      const changed = extractTouchSamples(ne?.changedTouches, ne);
+      const all = ne?.touches ? extractTouchSamples(ne.touches) : undefined;
+      touchControllerRef.current.handleTouchMove(changed, all);
+      syncTouchInputs();
+    },
+    [syncTouchInputs],
+  );
+
+  const handleRaceTouchEnd = useCallback(
+    (event: any) => {
+      const ne = event?.nativeEvent;
+      const changed = extractTouchSamples(ne?.changedTouches, ne);
+      const all = ne?.touches ? extractTouchSamples(ne.touches) : undefined;
+      touchControllerRef.current.handleTouchEnd(changed, all);
+      syncTouchInputs();
+    },
+    [syncTouchInputs],
+  );
+
+  const handleRaceTouchCancel = useCallback(() => {
+    touchControllerRef.current.handleTouchCancel();
+    clearHeldInputs();
+  }, [clearHeldInputs]);
 
   return (
     <SafeAreaView style={styles.root}>
@@ -299,14 +528,18 @@ export default function App() {
       )}
 
       {screen === 'race' && (
-        <View style={StyleSheet.absoluteFill}>
+        <View
+          style={StyleSheet.absoluteFill}
+          onTouchStart={handleRaceTouchStart}
+          onTouchMove={handleRaceTouchMove}
+          onTouchEnd={handleRaceTouchEnd}
+          onTouchCancel={handleRaceTouchCancel}
+        >
           <GLView style={StyleSheet.absoluteFill} onContextCreate={onContextCreate} />
           <TouchHud
             hud={hud}
-            onLeft={(v) => (inputRef.current.left = v)}
-            onRight={(v) => (inputRef.current.right = v)}
-            onDrift={(v) => (inputRef.current.drift = v)}
-            onBrake={(v) => (inputRef.current.brake = v)}
+            pressed={pressedButtons}
+            onZoneRect={setZoneRect}
             onPause={pauseRace}
             gyro={settings.gyro}
             paused={paused}
@@ -314,12 +547,7 @@ export default function App() {
           {paused && (
             <PauseMenu
               onResume={resumeRace}
-              onRestart={() => {
-                clearHeldInputs();
-                engineRef.current?.restart();
-                engineRef.current?.resetFrameClock();
-                resumeRace();
-              }}
+              onRestart={restartCurrentRace}
               onMenu={quitRace}
             />
           )}
@@ -331,13 +559,7 @@ export default function App() {
           result={hud.results}
           circuitName={circuit.name}
           profile={profile}
-          onRestart={() => {
-            clearHeldInputs();
-            pausedRef.current = false;
-            setPaused(false);
-            setHud((current) => ({ ...current, results: null, time: 0, lap: 1, speed: 0 }));
-            setScreen('race');
-          }}
+          onRestart={startRace}
           onQuit={quitRace}
         />
       )}
@@ -470,86 +692,174 @@ const MenuScreen: React.FC<{
 /* ------------------------------------------------------------------ */
 
 const HoldButton: React.FC<{
+  zoneId: TouchZoneId;
+  pressed: boolean;
+  parentOffset: { x: number; y: number };
+  onZoneRect: (id: TouchZoneId, rect: TouchZoneRect | null) => void;
   accessibilityLabel: string;
   style: any;
-  onHold: (held: boolean) => void;
   children: React.ReactNode;
-}> = ({ accessibilityLabel, style, onHold, children }) => {
-  const activeTouches = useRef(new Set<number>());
-  const [pressed, setPressed] = useState(false);
-  const getIds = (event: any): number[] => {
-    const changed = event.nativeEvent?.changedTouches;
-    if (changed?.length) return Array.from(changed, (touch: any) => Number(touch.identifier));
-    const id = event.nativeEvent?.identifier;
-    return [Number.isFinite(id) ? Number(id) : 0];
-  };
-  const onStart = (event: any) => {
-    for (const id of getIds(event)) activeTouches.current.add(id);
-    setPressed(true);
-    onHold(true);
-  };
-  const onEnd = (event: any) => {
-    for (const id of getIds(event)) activeTouches.current.delete(id);
-    const held = activeTouches.current.size > 0;
-    setPressed(held);
-    onHold(held);
-  };
-  const onCancel = () => {
-    activeTouches.current.clear();
-    setPressed(false);
-    onHold(false);
-  };
+}> = ({ zoneId, pressed, parentOffset, onZoneRect, accessibilityLabel, style, children }) => {
+  const viewRef = useRef<View | null>(null);
+  const localLayoutRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const { width: winW, height: winH } = useWindowDimensions();
+
+  const updateMeasuredRect = useCallback(() => {
+    const local = localLayoutRef.current;
+    if (local && local.width > 0 && local.height > 0) {
+      onZoneRect(zoneId, {
+        left: parentOffset.x + local.x,
+        top: parentOffset.y + local.y,
+        width: local.width,
+        height: local.height,
+      });
+    }
+    const node = viewRef.current as any;
+    if (node && typeof node.measure === 'function') {
+      node.measure((_x: number, _y: number, width: number, height: number, pageX: number, pageY: number) => {
+        if (width > 0 && height > 0 && Number.isFinite(pageX) && Number.isFinite(pageY)) {
+          onZoneRect(zoneId, { left: pageX, top: pageY, width, height });
+        }
+      });
+    }
+  }, [onZoneRect, parentOffset.x, parentOffset.y, zoneId]);
+
+  useEffect(() => {
+    updateMeasuredRect();
+  }, [winW, winH, updateMeasuredRect]);
+
+  useEffect(
+    () => () => {
+      onZoneRect(zoneId, null);
+    },
+    [onZoneRect, zoneId],
+  );
+
   return (
     <View
+      ref={viewRef}
+      collapsable={false}
       accessible
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
-      style={[style, pressed && { opacity: 0.78, transform: [{ scale: 0.94 }] }]}
-      onTouchStart={onStart}
-      onTouchEnd={onEnd}
-      onTouchCancel={onCancel}
+      style={[style, pressed && { opacity: 0.78 }]}
+      onLayout={(e) => {
+        localLayoutRef.current = e.nativeEvent.layout;
+        updateMeasuredRect();
+      }}
     >
-      {children}
+      <View
+        pointerEvents="none"
+        style={{
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 4,
+          transform: pressed ? [{ scale: 0.94 }] : undefined,
+        }}
+      >
+        {children}
+      </View>
     </View>
   );
 };
 
 const TouchHud: React.FC<{
   hud: any;
-  onLeft: (v: boolean) => void;
-  onRight: (v: boolean) => void;
-  onDrift: (v: boolean) => void;
-  onBrake: (v: boolean) => void;
+  pressed: HeldButtons;
+  onZoneRect: (id: TouchZoneId, rect: TouchZoneRect | null) => void;
   onPause: () => void;
   gyro: boolean;
   paused: boolean;
-}> = ({ hud, onLeft, onRight, onDrift, onBrake, onPause, gyro, paused }) => {
+}> = ({ hud, pressed, onZoneRect, onPause, gyro, paused }) => {
   const tierColors = ['#8ea2c8', '#40c8ff', '#ff9a2e', '#c65cff'];
+  const [topOffset, setTopOffset] = useState({ x: 16, y: 16 });
+  const [controlsOffset, setControlsOffset] = useState({ x: 0, y: 0 });
+  const pauseBtnRef = useRef<View | null>(null);
+  const pauseLocalRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const { width: winW, height: winH } = useWindowDimensions();
+
+  const updatePauseRect = useCallback(() => {
+    if (paused) {
+      onZoneRect('pause', null);
+      return;
+    }
+    const local = pauseLocalRef.current;
+    if (local && local.width > 0 && local.height > 0) {
+      onZoneRect('pause', {
+        left: topOffset.x + local.x,
+        top: topOffset.y + local.y,
+        width: local.width,
+        height: local.height,
+      });
+    }
+    const node = pauseBtnRef.current as any;
+    if (node && typeof node.measure === 'function') {
+      node.measure((_x: number, _y: number, width: number, height: number, pageX: number, pageY: number) => {
+        if (!paused && width > 0 && height > 0 && Number.isFinite(pageX) && Number.isFinite(pageY)) {
+          onZoneRect('pause', { left: pageX, top: pageY, width, height });
+        }
+      });
+    }
+  }, [onZoneRect, paused, topOffset.x, topOffset.y]);
+
+  useEffect(() => {
+    updatePauseRect();
+  }, [winW, winH, paused, updatePauseRect]);
+
+  useEffect(
+    () => () => {
+      onZoneRect('pause', null);
+    },
+    [onZoneRect],
+  );
+
   return (
     <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
-      {/* chrono / tour / place */}
-      <View style={styles.hudTop} pointerEvents="none">
-        <View style={styles.hudCard}>
+      {/* chrono / tour / place — box-none pour laisser le bouton PAUSE cliquable */}
+      <View
+        style={styles.hudTop}
+        pointerEvents="box-none"
+        onLayout={(e) => {
+          const { x, y } = e.nativeEvent.layout;
+          setTopOffset((prev) => (prev.x === x && prev.y === y ? prev : { x, y }));
+        }}
+      >
+        <View style={styles.hudCard} pointerEvents="none">
           <Text style={styles.hudLabel}>TOUR</Text>
           <Text style={styles.hudValue}>
             {hud.lap}/{hud.laps}
           </Text>
         </View>
-        <View style={styles.hudCard}>
+        <View style={styles.hudCard} pointerEvents="none">
           <Text style={styles.hudLabel}>TEMPS</Text>
           <Text style={[styles.hudValue, { fontSize: 20 }]}>{formatTime(hud.time)}</Text>
         </View>
-        <View style={styles.hudCard}>
+        <View style={styles.hudCard} pointerEvents="none">
           <Text style={styles.hudLabel}>PLACE</Text>
           <Text style={styles.hudValue}>
             {hud.place}
             <Text style={{ fontSize: 13, color: '#93a6cc' }}>/{hud.total}</Text>
           </Text>
         </View>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Mettre en pause" style={styles.iconButton} onPress={onPause}>
-          <Icon name="pause" size={18} color="#fff" />
-          <Text style={styles.actionText}>PAUSE</Text>
-        </TouchableOpacity>
+        <View
+          ref={pauseBtnRef}
+          collapsable={false}
+          style={{ marginLeft: 'auto' }}
+          onLayout={(e) => {
+            pauseLocalRef.current = e.nativeEvent.layout;
+            updatePauseRect();
+          }}
+        >
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Mettre en pause"
+            style={styles.iconButton}
+            onPress={onPause}
+          >
+            <Icon name="pause" size={18} color="#fff" />
+            <Text style={styles.actionText}>PAUSE</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* compteur de vitesse */}
@@ -570,43 +880,64 @@ const TouchHud: React.FC<{
       </View>
 
       {/* commandes : démontées pendant la pause pour invalider tout touch encore actif */}
-      {!paused && <View style={styles.controls} pointerEvents="box-none">
-        {!gyro && (
-          <>
-            <HoldButton
-              accessibilityLabel="Gauche"
-              style={[styles.padButton, { left: 18 }]}
-              onHold={onLeft}
-            >
-              <Icon name="chevronLeft" size={38} color="#fff" />
-            </HoldButton>
-            <HoldButton
-              accessibilityLabel="Droite"
-              style={[styles.padButton, { left: 126 }]}
-              onHold={onRight}
-            >
-              <Icon name="chevronRight" size={38} color="#fff" />
-            </HoldButton>
-          </>
-        )}
-        <View style={{ flex: 1 }} />
-        <HoldButton
-          accessibilityLabel="Frein"
-          style={[styles.actionButton, { backgroundColor: '#ff3d6ecc' }]}
-          onHold={onBrake}
+      {!paused && (
+        <View
+          style={styles.controls}
+          pointerEvents="box-none"
+          onLayout={(e) => {
+            const { x, y } = e.nativeEvent.layout;
+            setControlsOffset((prev) => (prev.x === x && prev.y === y ? prev : { x, y }));
+          }}
         >
-          <Icon name="shield" size={22} color="#fff" />
-          <Text style={styles.actionText}>FREIN</Text>
-        </HoldButton>
-        <HoldButton
-          accessibilityLabel="Dérapage"
-          style={[styles.actionButton, styles.driftButton]}
-          onHold={onDrift}
-        >
-          <Icon name="drift" size={24} color="#fff" />
-          <Text style={styles.actionText}>DÉRAPAGE</Text>
-        </HoldButton>
-      </View>}
+          {!gyro && (
+            <>
+              <HoldButton
+                zoneId="left"
+                pressed={pressed.left}
+                parentOffset={controlsOffset}
+                onZoneRect={onZoneRect}
+                accessibilityLabel="Gauche"
+                style={[styles.padButton, { left: 18 }]}
+              >
+                <Icon name="chevronLeft" size={38} color="#fff" />
+              </HoldButton>
+              <HoldButton
+                zoneId="right"
+                pressed={pressed.right}
+                parentOffset={controlsOffset}
+                onZoneRect={onZoneRect}
+                accessibilityLabel="Droite"
+                style={[styles.padButton, { left: 126 }]}
+              >
+                <Icon name="chevronRight" size={38} color="#fff" />
+              </HoldButton>
+            </>
+          )}
+          <View style={{ flex: 1 }} pointerEvents="none" />
+          <HoldButton
+            zoneId="brake"
+            pressed={pressed.brake}
+            parentOffset={controlsOffset}
+            onZoneRect={onZoneRect}
+            accessibilityLabel="Frein"
+            style={[styles.actionButton, { backgroundColor: '#ff3d6ecc' }]}
+          >
+            <Icon name="shield" size={22} color="#fff" />
+            <Text style={styles.actionText}>FREIN</Text>
+          </HoldButton>
+          <HoldButton
+            zoneId="drift"
+            pressed={pressed.drift}
+            parentOffset={controlsOffset}
+            onZoneRect={onZoneRect}
+            accessibilityLabel="Dérapage"
+            style={[styles.actionButton, styles.driftButton]}
+          >
+            <Icon name="drift" size={24} color="#fff" />
+            <Text style={styles.actionText}>DÉRAPAGE</Text>
+          </HoldButton>
+        </View>
+      )}
 
       {!paused && hud.countdown > 0 && (
         <View style={styles.countdownOverlay} pointerEvents="none">

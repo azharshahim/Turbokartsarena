@@ -517,6 +517,17 @@ export function createScenery(
   const counts = [0, 0, 0];
   const maxPer = Math.ceil(count / 3) + 2;
 
+  const isClearOfTrack = (x: number, z: number, margin: number) => {
+    for (let k = 0; k < trackPoints.length; k++) {
+      const tp = trackPoints[k];
+      const dx = x - tp.x;
+      const dz = z - tp.z;
+      const minD = tp.halfWidth + margin;
+      if (dx * dx + dz * dz < minD * minD) return false;
+    }
+    return true;
+  };
+
   for (let i = 0; i < count; i++) {
     const p = trackPoints[Math.floor(rng() * trackPoints.length)];
     const side = rng() < 0.5 ? -1 : 1;
@@ -527,8 +538,10 @@ export function createScenery(
     const v = Math.floor(rng() * 3);
     if (counts[v] >= maxPer) continue;
     const s = rrange(rng, 0.7, 1.7);
+    const rotY = rng() * Math.PI * 2;
+    if (!isClearOfTrack(x, z, 3.2)) continue;
     dummy.position.set(x, y + (isDesert ? 1.6 : 2.2) * s, z);
-    dummy.rotation.set(0, rng() * Math.PI * 2, 0);
+    dummy.rotation.set(0, rotY, 0);
     dummy.scale.setScalar(s);
     dummy.updateMatrix();
     (variants[v] as THREE.InstancedMesh).setMatrixAt(counts[v]++, dummy.matrix);
@@ -554,11 +567,14 @@ export function createScenery(
     // on garnit surtout l'extérieur des virages
     for (const side of [-1, 1]) {
       const dist = p.halfWidth + 2.6;
+      const tx = p.x + p.rx * dist * side;
+      const tz = p.z + p.rz * dist * side;
+      if (!isClearOfTrack(tx, tz, 1.8)) continue;
       for (let stack = 0; stack < 3; stack++) {
         dummy.position.set(
-          p.x + p.rx * dist * side,
+          tx,
           p.y + 0.18 + stack * 0.3,
-          p.z + p.rz * dist * side,
+          tz,
         );
         dummy.rotation.set(Math.PI / 2, 0, rng() * 3);
         dummy.scale.setScalar(rrange(rng, 0.85, 1.15));
@@ -594,12 +610,33 @@ export function createScenery(
 
   let ci = 0;
   const standSpots = [0.04, 0.5, 0.78, 0.28].slice(0, Math.max(1, q.level === 'low' ? 1 : 3));
+  const findClearSideSpot = (startIdx: number, offset: number, clearance: number) => {
+    const nPts = trackPoints.length;
+    for (let stepOff = 0; stepOff <= 40; stepOff++) {
+      for (const dir of stepOff === 0 ? [0] : [1, -1]) {
+        const idx = (startIdx + dir * stepOff + nPts) % nPts;
+        const p = trackPoints[idx];
+        for (const side of [1, -1]) {
+          const bx = p.x + p.rx * (p.halfWidth + offset) * side;
+          const bz = p.z + p.rz * (p.halfWidth + offset) * side;
+          if (
+            isClearOfTrack(bx, bz, clearance) &&
+            isClearOfTrack(bx + p.tx * 6, bz + p.tz * 6, clearance * 0.8) &&
+            isClearOfTrack(bx - p.tx * 6, bz - p.tz * 6, clearance * 0.8)
+          ) {
+            return { p, side, baseX: bx, baseZ: bz };
+          }
+        }
+      }
+    }
+    return null;
+  };
+
   for (const frac of standSpots) {
-    const idx = Math.floor(trackPoints.length * frac) % trackPoints.length;
-    const p = trackPoints[idx];
-    const side = 1;
-    const baseX = p.x + p.rx * (p.halfWidth + 9) * side;
-    const baseZ = p.z + p.rz * (p.halfWidth + 9) * side;
+    const startIdx = Math.floor(trackPoints.length * frac) % trackPoints.length;
+    const spot = findClearSideSpot(startIdx, 9, 6.2);
+    if (!spot) continue;
+    const { p, baseX, baseZ } = spot;
     const stand = new THREE.Mesh(standGeo, standMat);
     stand.position.set(baseX, p.y + 1.1, baseZ);
     stand.rotation.y = Math.atan2(p.rx, p.rz);
@@ -651,8 +688,32 @@ export function createScenery(
   });
   disposables.push(bannerGeo, bannerMat);
   for (const frac of [0, 0.25, 0.55, 0.8]) {
-    const idx = Math.floor(trackPoints.length * frac) % trackPoints.length;
-    const p = trackPoints[idx];
+    const startIdx = Math.floor(trackPoints.length * frac) % trackPoints.length;
+    const nPts = trackPoints.length;
+    let chosen: (typeof trackPoints)[number] | null = null;
+    for (let stepOff = 0; stepOff <= 45; stepOff++) {
+      for (const dir of stepOff === 0 ? [0] : [1, -1]) {
+        const idx = (startIdx + dir * stepOff + nPts) % nPts;
+        const cand = trackPoints[idx];
+        const candPrev = trackPoints[(idx - 2 + nPts) % nPts];
+        const candNext = trackPoints[(idx + 2) % nPts];
+        // Évite de poser un portique au milieu d'une épingle serrée
+        if (stepOff > 0 || frac !== 0) {
+          const align = candPrev.tx * candNext.tx + candPrev.tz * candNext.tz;
+          if (align < 0.92) continue;
+        }
+        const candSpan = cand.halfWidth + 2.2;
+        const pLeftOk = isClearOfTrack(cand.x - cand.rx * candSpan, cand.z - cand.rz * candSpan, 3.2);
+        const pRightOk = isClearOfTrack(cand.x + cand.rx * candSpan, cand.z + cand.rz * candSpan, 3.2);
+        if (pLeftOk && pRightOk) {
+          chosen = cand;
+          break;
+        }
+      }
+      if (chosen) break;
+    }
+    if (!chosen) continue;
+    const p = chosen;
     const gate = new THREE.Group();
     const span = p.halfWidth + 2.2;
     // le portique local est orienté en Z ; on l'aligne sur la normale latérale
@@ -685,6 +746,9 @@ export function createScenery(
       const side = rng() < 0.5 ? -1 : 1;
       const dist = p.halfWidth + rrange(rng, 16, 60);
       const h = rrange(rng, 14, 42);
+      const tx = p.x + p.rx * dist * side;
+      const tz = p.z + p.rz * dist * side;
+      if (!isClearOfTrack(tx, tz, 6.5)) continue;
       const g = new THREE.Group();
       const tower = new THREE.Mesh(towerGeo, towerMat);
       tower.scale.y = h / 30;
@@ -696,7 +760,7 @@ export function createScenery(
         strip.position.y = h * (0.18 + k * 0.17);
         g.add(strip);
       }
-      g.position.set(p.x + p.rx * dist * side, p.y - 2, p.z + p.rz * dist * side);
+      g.position.set(tx, p.y - 2, tz);
       group.add(g);
     }
     // drones flottants au-dessus de la piste
@@ -718,10 +782,15 @@ export function createScenery(
       const p = trackPoints[Math.floor(rng() * trackPoints.length)];
       const side = rng() < 0.5 ? -1 : 1;
       const dist = p.halfWidth + rrange(rng, 12, 40);
+      const rotJitter = rng() - 0.5;
+      const scale = rrange(rng, 0.8, 1.6);
+      const ax = p.x + p.rx * dist * side;
+      const az = p.z + p.rz * dist * side;
+      if (!isClearOfTrack(ax, az, 12.5 * scale)) continue;
       const arch = new THREE.Mesh(archGeo, rockMat);
-      arch.position.set(p.x + p.rx * dist * side, p.y - 1, p.z + p.rz * dist * side);
-      arch.rotation.y = Math.atan2(p.rx, p.rz) + (rng() - 0.5);
-      arch.scale.setScalar(rrange(rng, 0.8, 1.6));
+      arch.position.set(ax, p.y - 1, az);
+      arch.rotation.y = Math.atan2(p.rx, p.rz) + rotJitter;
+      arch.scale.setScalar(scale);
       arch.castShadow = q.shadows;
       group.add(arch);
     }
@@ -749,16 +818,22 @@ export function createScenery(
       const p = trackPoints[Math.floor(rng() * trackPoints.length)];
       const side = rng() < 0.5 ? -1 : 1;
       const dist = p.halfWidth + rrange(rng, 5, 16);
+      const hue = rng();
+      const phase = rng() * 6.28;
+      const speed = 2 + rng() * 2;
+      const fx = p.x + p.rx * dist * side;
+      const fz = p.z + p.rz * dist * side;
+      if (!isClearOfTrack(fx, fz, 2.5)) continue;
       const flagMat = new THREE.MeshStandardMaterial({
-        color: new THREE.Color().setHSL(rng(), 0.8, 0.58),
+        color: new THREE.Color().setHSL(hue, 0.8, 0.58),
         side: THREE.DoubleSide,
         roughness: 0.8,
       });
       disposables.push(flagMat);
       const flag = new THREE.Mesh(flagGeo, flagMat);
-      flag.position.set(p.x + p.rx * dist * side, p.y + 3.4, p.z + p.rz * dist * side);
+      flag.position.set(fx, p.y + 3.4, fz);
       group.add(flag);
-      animated.push({ obj: flag, kind: 'flag', phase: rng() * 6.28, speed: 2 + rng() * 2 });
+      animated.push({ obj: flag, kind: 'flag', phase, speed });
     }
   }
 
