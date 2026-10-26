@@ -31,6 +31,68 @@ export function buildTrackMesh(
   const n = track.count;
   const step = track.step;
 
+  // Demi-largeurs visuelles par côté : à l'intérieur d'une épingle très serrée,
+  // si la demi-largeur dépasse le rayon géométrique réel de courbure, les rubans
+  // extrudés (route, vibreurs, liserés néon) rebroussent chemin et créent un pli.
+  const computeSideHalfWidths = (side: -1 | 1) => {
+    const caps = new Float64Array(n);
+    const out = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const p = track.sampleAtIndex(i);
+      let innerRadius = Infinity;
+      for (const d of [1, 2, 3]) {
+        const a = track.sampleAtIndex(i - d);
+        const b = track.sampleAtIndex(i + d);
+        const ux = p.x - a.x;
+        const uz = p.z - a.z;
+        const vx = b.x - p.x;
+        const vz = b.z - p.z;
+        const lu = Math.hypot(ux, uz);
+        const lv = Math.hypot(vx, vz);
+        if (lu < 1e-4 || lv < 1e-4) continue;
+        // > 0 lorsque la courbe tourne vers `side` (côté intérieur du virage)
+        const bendToSide = (vx / lv - ux / lu) * (p.rx * side) + (vz / lv - uz / lu) * (p.rz * side);
+        if (bendToSide <= 1e-4) continue;
+        const cross = Math.abs(ux * vz - uz * vx);
+        if (cross > 1e-5) {
+          const r = (lu * lv * Math.hypot(b.x - a.x, b.z - a.z)) / (2 * cross);
+          if (r < innerRadius) innerRadius = r;
+        }
+      }
+      let oppCap = Infinity;
+      for (let j = 0; j < n; j++) {
+        const circ = Math.min(Math.abs(j - i), n - Math.abs(j - i));
+        if (circ < 6) continue;
+        const qSample = track.sampleAtIndex(j);
+        if (p.tx * qSample.tx + p.tz * qSample.tz > 0.35) continue;
+        const dx = qSample.x - p.x;
+        const dz = qSample.z - p.z;
+        // Uniquement si l'autre branche se trouve bien du côté `side`
+        if (dx * p.rx * side + dz * p.rz * side <= 0) continue;
+        const d = Math.hypot(dx, dz);
+        const cCap = (d - 3.2) * 0.5;
+        if (cCap < oppCap) oppCap = cCap;
+      }
+      const cap = Math.min(p.halfWidth, Math.max(4.5, Math.min(innerRadius - 1.95, oppCap)));
+      caps[i] = cap;
+      out[i] = cap;
+    }
+    for (let pass = 0; pass < 5; pass++) {
+      const prev = Float64Array.from(out);
+      for (let i = 0; i < n; i++) {
+        const avg = (prev[(i - 1 + n) % n] + prev[i] * 2 + prev[(i + 1) % n]) * 0.25;
+        out[i] = Math.min(caps[i], avg);
+      }
+    }
+    return out;
+  };
+  const leftHalfWidths = computeSideHalfWidths(-1);
+  const rightHalfWidths = computeSideHalfWidths(1);
+  const sideHalfWidthAt = (i: number, side: number) => {
+    const idx = ((i % n) + n) % n;
+    return side < 0 ? leftHalfWidths[idx] : rightHalfWidths[idx];
+  };
+
   /* ---------------- route ---------------- */
   const positions: number[] = [];
   const normals: number[] = [];
@@ -46,9 +108,11 @@ export function buildTrackMesh(
     const dy = smp.y - prev.y;
     const dist = Math.hypot(step, dy);
     if (i > 0) vAccum += dist / 6; // 1 tuile de texture tous les 6 m
+    const lhw = sideHalfWidthAt(i, -1);
+    const rhw = sideHalfWidthAt(i, 1);
     for (let c = 0; c < cols; c++) {
       const t = (c / (cols - 1)) * 2 - 1; // -1 … 1
-      const lat = t * smp.halfWidth;
+      const lat = t < 0 ? t * lhw : t * rhw;
       const x = smp.x + smp.rx * lat;
       const z = smp.z + smp.rz * lat;
       const y = smp.y + lat * smp.bank;
@@ -58,7 +122,7 @@ export function buildTrackMesh(
       const nz = -smp.bank * smp.rz;
       const len = Math.hypot(nx, 1, nz);
       normals.push(nx / len, 1 / len, nz / len);
-      uvs.push((t + 1) * 0.5 * (smp.halfWidth / 3.4), vAccum);
+      uvs.push((t + 1) * 0.5 * ((lhw + rhw) * 0.5 / 3.4), vAccum);
       // gomme déposée sur la trajectoire de course + bords plus clairs
       const groove = Math.exp(-Math.pow((t - Math.sign(smp.curvature) * 0.35) * 2.6, 2)) * 0.22;
       const edgeLight = 1 + Math.pow(Math.abs(t), 6) * 0.25;
@@ -97,9 +161,10 @@ export function buildTrackMesh(
     const idx: number[] = [];
     for (let i = 0; i <= n; i++) {
       const smp = track.sampleAtIndex(i);
+      const hw = sideHalfWidthAt(i, side);
       for (let c = 0; c < 2; c++) {
-        const inner = smp.halfWidth - 0.25;
-        const outer = smp.halfWidth + 1.25;
+        const inner = hw - 0.25;
+        const outer = hw + 1.25;
         const lat = (c === 0 ? inner : outer) * side;
         // léger relief : le vibreur est surélevé de 5 cm, biseau côté piste
         const lift = c === 0 ? 0.02 : 0.075;
@@ -146,8 +211,9 @@ export function buildTrackMesh(
     const idx: number[] = [];
     for (let i = 0; i <= n; i++) {
       const smp = track.sampleAtIndex(i);
-      const inner = smp.halfWidth - 0.62;
-      const outer = smp.halfWidth - 0.24;
+      const hw = sideHalfWidthAt(i, side);
+      const inner = hw - 0.62;
+      const outer = hw - 0.24;
       for (let c = 0; c < 2; c++) {
         const lat = (c === 0 ? inner : outer) * side;
         pos.push(smp.x + smp.rx * lat, smp.y + lat * smp.bank + 0.03, smp.z + smp.rz * lat);
@@ -248,7 +314,10 @@ export function buildTrackMesh(
       const smp = track.sampleAtDistance(i * spacing);
       for (const side of [-1, 1]) {
         const lat = (smp.halfWidth + 1.9) * side;
-        d2.position.set(smp.x + smp.rx * lat, smp.y + 0.75, smp.z + smp.rz * lat);
+        const px = smp.x + smp.rx * lat;
+        const pz = smp.z + smp.rz * lat;
+        if (track.query(px, pz, -1, false).surface !== 'grass') continue;
+        d2.position.set(px, smp.y + 0.75, pz);
         d2.rotation.set(0, Math.atan2(smp.tx, smp.tz), 0);
         d2.updateMatrix();
         posts.setMatrixAt(pi++, d2.matrix);
@@ -265,7 +334,7 @@ export function buildTrackMesh(
       const idx2: number[] = [];
       for (let i = 0; i <= n; i++) {
         const smp = track.sampleAtIndex(i);
-        const lat = (smp.halfWidth + 1.32) * side;
+        const lat = (sideHalfWidthAt(i, side) + 1.32) * side;
         pos2.push(smp.x + smp.rx * lat, smp.y + 0.06, smp.z + smp.rz * lat);
         pos2.push(smp.x + smp.rx * lat, smp.y + 0.34, smp.z + smp.rz * lat);
       }
@@ -305,7 +374,10 @@ export function buildTrackMesh(
     if (Math.abs(smp.curvature) < 0.008) continue;
     for (const side of [-1, 1]) {
       const lat = (smp.halfWidth + 4.5) * side;
-      dummy.position.set(smp.x + smp.rx * lat, smp.y + 0.5, smp.z + smp.rz * lat);
+      const wx = smp.x + smp.rx * lat;
+      const wz = smp.z + smp.rz * lat;
+      if (track.query(wx, wz, -1, false).surface !== 'grass') continue;
+      dummy.position.set(wx, smp.y + 0.5, wz);
       dummy.rotation.set(0, Math.atan2(smp.tx, smp.tz), 0);
       dummy.updateMatrix();
       walls.setMatrixAt(wi++, dummy.matrix);

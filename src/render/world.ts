@@ -204,9 +204,16 @@ export class PhysicsEngine {
       const x = pos.getX(i);
       const z = pos.getZ(i);
       // Le terrain épouse la piste (talus) puis devient colline au loin :
-      // la route n'est jamais enterrée ni suspendue.
+      // la route n'est jamais enterrée ni suspendue. Sous la chaussée, on
+      // creuse légèrement la maille grossière (~13,6 m) pour qu'aucune
+      // diagonale de triangle ne remonte à travers un virage relevé.
       const h = track.groundHeight(x, z);
-      pos.setY(i, h - 0.12);
+      const q = track.query(x, z, -1, false);
+      const over = Math.max(0, Math.abs(q.lateral) - q.halfWidth);
+      const t = clamp(over / 7.5, 0, 1);
+      const s = t * t * (3 - 2 * t);
+      const clearance = lerp(0.68, 0.12, s);
+      pos.setY(i, h - clearance);
     }
     terrainGeo.computeVertexNormals();
     const groundMesh = new THREE.Mesh(terrainGeo, this.materials.grass);
@@ -304,6 +311,9 @@ export class PhysicsEngine {
     this.race.reset();
     this.race.phase = 'countdown';
     this.finishedFired = false;
+    this.lastTime = 0;
+    this.shake = 0;
+    this.input = { steer: 0, drift: false, brake: false, throttle: 1 };
     const p = this.race.player.state;
     this.camPos.set(p.x - Math.sin(p.heading) * 8, p.y + 4, p.z - Math.cos(p.heading) * 8);
     this.camYaw = p.heading;

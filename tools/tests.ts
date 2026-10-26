@@ -7,12 +7,15 @@
 import { Kart, resolveKartCollisions } from '../src/core/kart';
 import { Track } from '../src/core/track';
 import { Race, formatTime } from '../src/core/race';
-import { CIRCUITS } from '../src/game/circuits';
+import { CIRCUITS, THEMES } from '../src/game/circuits';
 import { ROSTER } from '../src/game/roster';
 import { makeBrain, thinkAi } from '../src/core/ai';
 import { makeRng } from '../src/core/math';
-import { PHYSICS, autoQuality } from '../src/core/config';
-import { MultiTouchControls } from '../src/core/touchControls';
+import { PHYSICS, QUALITY, autoQuality } from '../src/core/config';
+import { MultiTouchControls, TouchZoneController } from '../src/core/touchControls';
+import { createMaterials, createScenery } from '../src/render/models';
+import { buildTrackMesh } from '../src/render/trackMesh';
+import * as THREE from 'three';
 
 let passed = 0;
 let failed = 0;
@@ -98,6 +101,80 @@ test('commandes tactiles : deux doigts indépendants et relâchement exact', () 
   assert(input.activePointerCount === 0 && !input.drift, 'clear() laisse une commande coincée');
 });
 
+test('zones tactiles mobiles : multi-doigts, glissement, pause et annulation', () => {
+  const zones = new TouchZoneController();
+  zones.setZone('left', { left: 18, top: 300, width: 96, height: 96 });
+  zones.setZone('right', { left: 126, top: 300, width: 96, height: 96 });
+  zones.setZone('brake', { left: 660, top: 292, width: 104, height: 104 });
+  zones.setZone('drift', { left: 780, top: 292, width: 104, height: 104 });
+  zones.setZone('pause', { left: 800, top: 16, width: 96, height: 48 });
+
+  // Doigt #1 sur Gauche + doigt #2 sur Dérapage (cas Android RN où le root reçoit tous les pointeurs)
+  const r1 = zones.handleTouchStart([{ identifier: 1, pageX: 50, pageY: 340 }], [{ identifier: 1, pageX: 50, pageY: 340 }]);
+  assert(r1 === null && zones.left && !zones.drift, 'doigt #1 gauche non pris en compte');
+  const r2 = zones.handleTouchStart(
+    [{ identifier: 2, pageX: 820, pageY: 340 }],
+    [
+      { identifier: 1, pageX: 50, pageY: 340 },
+      { identifier: 2, pageX: 820, pageY: 340 },
+    ],
+  );
+  assert(r2 === null && zones.steer === -1 && zones.drift, 'doigt #2 dérapage ignoré pendant le maintien gauche');
+
+  // Glissement du doigt #1 de Gauche vers Droite puis hors des boutons (zone morte)
+  zones.handleTouchMove(
+    [{ identifier: 1, pageX: 165, pageY: 340 }],
+    [
+      { identifier: 1, pageX: 165, pageY: 340 },
+      { identifier: 2, pageX: 820, pageY: 340 },
+    ],
+  );
+  assert(zones.steer === 1 && zones.drift, 'glissement gauche → droite non suivi');
+  zones.handleTouchMove(
+    [{ identifier: 1, pageX: 400, pageY: 200 }],
+    [
+      { identifier: 1, pageX: 400, pageY: 200 },
+      { identifier: 2, pageX: 820, pageY: 340 },
+    ],
+  );
+  assert(zones.steer === 0 && zones.drift, 'glissement hors bouton doit relâcher la direction sans couper le dérapage');
+
+  // Un 3e doigt tape PAUSE pendant que le dérapage est maintenu
+  const rPause = zones.handleTouchStart(
+    [{ identifier: 3, pageX: 840, pageY: 36 }],
+    [
+      { identifier: 1, pageX: 400, pageY: 200 },
+      { identifier: 2, pageX: 820, pageY: 340 },
+      { identifier: 3, pageX: 840, pageY: 36 },
+    ],
+  );
+  assert(rPause === 'pause', 'appui multi-doigts sur PAUSE non détecté');
+  assert(zones.steer === 0 && !zones.drift && !zones.brake && zones.activePointerCount === 0, 'appui PAUSE doit neutraliser immédiatement les commandes');
+
+  // Démontage d’une zone (ex. passage en pause ou mode gyroscope) relâche immédiatement l’action associée
+  zones.handleTouchStart(
+    [
+      { identifier: 7, pageX: 50, pageY: 340 },
+      { identifier: 8, pageX: 700, pageY: 340 },
+    ],
+    [
+      { identifier: 7, pageX: 50, pageY: 340 },
+      { identifier: 8, pageX: 700, pageY: 340 },
+    ],
+  );
+  assert(zones.left && zones.brake, 'gauche + frein attendus');
+  zones.setZone('left', null);
+  assert(!zones.left && zones.brake, 'démonter la zone gauche doit relâcher gauche sans toucher au frein');
+
+  // Élagage des contacts fantômes via la liste active + touchcancel global
+  zones.handleTouchEnd([], []);
+  assert(!zones.brake && zones.activePointerCount === 0, 'contact fantôme non purgé');
+  zones.handleTouchStart([{ identifier: 9, pageX: 820, pageY: 340 }]);
+  assert(zones.drift, 'dérapage attendu avant touchcancel');
+  zones.handleTouchCancel();
+  assert(!zones.drift && zones.activePointerCount === 0, 'handleTouchCancel laisse un contact actif');
+});
+
 /* ================================================================== */
 console.log('\n▸ Pistes');
 /* ================================================================== */
@@ -178,6 +255,119 @@ test('route élargie de 25 % : limites de surface et dégagement préservés', (
       }
     }
     assert(minGap > 5, `${circuit.name} : chaussées trop proches / raccourci (${minGap.toFixed(1)} m)`);
+  }
+});
+
+test('circuits élargis (+25 %) : rubans sans pli ni obstacle sur la chaussée', () => {
+  const q = QUALITY.high;
+  const worldPos = new THREE.Vector3();
+  const mat4 = new THREE.Matrix4();
+
+  for (const circuit of CIRCUITS) {
+    const base = new Track({ ...circuit, widthScale: 1 });
+    const wide = new Track(circuit);
+    const theme = THEMES[circuit.themeId] ?? THEMES.coast;
+    const mats = createMaterials(theme, q);
+    const trackMesh = buildTrackMesh(wide, mats, q, { curbColors: theme.curbColors, id: theme.id });
+    const scenery = createScenery(theme, mats, q, wide.samples, circuit.seed);
+
+    try {
+      // 1) Pas d'intrusion supplémentaire d'un bord de chaussée dans un tronçon opposé
+      const countRoadIntrusions = (tr: Track) => {
+        let hits = 0;
+        for (let i = 0; i < tr.count; i++) {
+          const s = tr.samples[i];
+          for (const side of [-1, 1]) {
+            const ex = s.x + s.rx * s.halfWidth * side;
+            const ez = s.z + s.rz * s.halfWidth * side;
+            for (let j = 0; j < tr.count; j++) {
+              const circ = Math.min(Math.abs(j - i), tr.count - Math.abs(j - i));
+              if (circ < 14) continue;
+              const b = tr.samples[j];
+              if (Math.hypot(ex - b.x, ez - b.z) < b.halfWidth - 0.05) hits++;
+            }
+          }
+        }
+        return hits;
+      };
+      assert(
+        countRoadIntrusions(wide) <= countRoadIntrusions(base),
+        `${circuit.name} : l'élargissement +25 % crée de nouveaux recouvrements de chaussée`,
+      );
+
+      // 2) Les rubans de vibreurs ne rebroussent jamais chemin dans les épingles serrées
+      const curbMeshes = trackMesh.group.children.filter(
+        (obj): obj is THREE.Mesh => (obj as THREE.Mesh).isMesh && (obj as THREE.Mesh).material === mats.curb,
+      );
+      assert(curbMeshes.length === 2, `${circuit.name} : 2 rubans de vibreurs attendus`);
+      for (const curb of curbMeshes) {
+        const pos = curb.geometry.getAttribute('position') as THREE.BufferAttribute;
+        for (let i = 0; i < wide.count; i++) {
+          const smp = wide.sampleAtIndex(i);
+          // Sommet extérieur du vibreur : indice 2*i + 1
+          const ax = pos.getX(i * 2 + 1);
+          const az = pos.getZ(i * 2 + 1);
+          const bx = pos.getX((i + 1) * 2 + 1);
+          const bz = pos.getZ((i + 1) * 2 + 1);
+          const fwd = (bx - ax) * smp.tx + (bz - az) * smp.tz;
+          assert(fwd > 0.05, `${circuit.name} : pli/inversion du vibreur à l'échantillon ${i} (fwd=${fwd.toFixed(2)})`);
+        }
+      }
+
+      // 3) Aucun obstacle instancié (pneus, arbres, barrières, balises) ni pilier de portique sur la route/vibreur
+      const checkInstancesOffRoad = (root: THREE.Group, label: string) => {
+        root.updateMatrixWorld(true);
+        root.traverse((obj) => {
+          const inst = obj as THREE.InstancedMesh;
+          if (inst.isInstancedMesh && inst.geometry.type !== 'BoxGeometry') {
+            for (let k = 0; k < inst.count; k++) {
+              inst.getMatrixAt(k, mat4);
+              worldPos.setFromMatrixPosition(mat4).applyMatrix4(inst.matrixWorld);
+              const surf = wide.query(worldPos.x, worldPos.z, -1, false).surface;
+              assert(
+                surf === 'grass',
+                `${circuit.name} (${label}) : instance #${k} posée sur ${surf} (${worldPos.x.toFixed(1)}, ${worldPos.z.toFixed(1)})`,
+              );
+            }
+          }
+        });
+      };
+      checkInstancesOffRoad(scenery.group, 'décor');
+
+      // Vérifie aussi les barrières et balises de piste (InstancedMesh dans trackMesh)
+      trackMesh.group.updateMatrixWorld(true);
+      for (const child of trackMesh.group.children) {
+        const inst = child as THREE.InstancedMesh;
+        if (!inst.isInstancedMesh) continue;
+        for (let k = 0; k < inst.count; k++) {
+          inst.getMatrixAt(k, mat4);
+          worldPos.setFromMatrixPosition(mat4).applyMatrix4(inst.matrixWorld);
+          const surf = wide.query(worldPos.x, worldPos.z, -1, false).surface;
+          assert(
+            surf === 'grass',
+            `${circuit.name} (piste) : obstacle #${k} posé sur ${surf}`,
+          );
+        }
+      }
+
+      // Vérifie que les piliers des portiques sont bien hors chaussée/vibreur
+      scenery.group.updateMatrixWorld(true);
+      for (const child of scenery.group.children) {
+        if (child.type !== 'Group' || child.children.length !== 3) continue;
+        for (let pIdx = 0; pIdx < 2; pIdx++) {
+          child.children[pIdx].getWorldPosition(worldPos);
+          const surf = wide.query(worldPos.x, worldPos.z, -1, false).surface;
+          assert(
+            surf === 'grass',
+            `${circuit.name} : pilier de portique posé sur ${surf}`,
+          );
+        }
+      }
+    } finally {
+      scenery.dispose();
+      trackMesh.dispose();
+      mats.dispose();
+    }
   }
 });
 

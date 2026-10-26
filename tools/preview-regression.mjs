@@ -113,10 +113,119 @@ await page.locator('#restartBtn').click();
 assert.equal(await page.evaluate(() => window.__tka.state.paused), false, 'restart did not close pause');
 assert.equal(await page.evaluate(() => window.__tka.engine().race.phase), 'countdown', 'restart did not restart countdown');
 assert.ok(await page.evaluate(() => window.__tka.engine().race.raceTime) < 0.1, 'restart did not reset the race clock');
+
+await page.evaluate(() => {
+  window.__tka.pauseLoop();
+  window.__tka.skipCountdown();
+  window.__tka.engine().resetFrameClock();
+  window.__tka.step(4, 16.67);
+});
+
+// Repeated pause/resume cycles must never stack duplicate requestAnimationFrame loops.
+const cycleStats = await page.evaluate(async () => {
+  const pausedRaf = [];
+  const resumedRaf = [];
+  for (let cycle = 0; cycle < 5; cycle++) {
+    document.getElementById('pauseBtn').click();
+    pausedRaf.push([window.__tka.state.paused, window.__tka.rafActive()]);
+    document.getElementById('resumeBtn').click();
+    resumedRaf.push([window.__tka.state.paused, window.__tka.rafActive()]);
+  }
+  const t0 = window.__tka.engine().race.raceTime;
+  const p0 = performance.now();
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r))));
+  const wallSec = (performance.now() - p0) / 1000;
+  const simSec = window.__tka.engine().race.raceTime - t0;
+  window.__tka.pauseLoop();
+  return { pausedRaf, resumedRaf, wallSec, simSec };
+});
+for (let cycle = 0; cycle < 5; cycle++) {
+  assert.deepEqual(cycleStats.pausedRaf[cycle], [true, false], `cycle ${cycle}: pause left rAF active`);
+  assert.deepEqual(cycleStats.resumedRaf[cycle], [false, true], `cycle ${cycle}: resume did not arm rAF`);
+}
+assert.ok(cycleStats.simSec <= Math.max(0.25, cycleStats.wallSec * 1.5), `duplicate rAF suspected: sim=${cycleStats.simSec.toFixed(3)}s wall=${cycleStats.wallSec.toFixed(3)}s`);
+
+// Global touchcancel, Shift+letter keyup case mismatch, and window blur/focus must leave controls neutral.
+await page.dispatchEvent('#leftBtn', 'pointerdown', { pointerId: 51, pointerType: 'touch', isPrimary: true, button: 0 });
+await page.dispatchEvent('#driftBtn', 'pointerdown', { pointerId: 52, pointerType: 'touch', isPrimary: false, button: 0 });
+assert.deepEqual(await page.evaluate(() => [window.__tka.currentSteer(), window.__tka.currentDrift()]), [-1, true]);
+await page.evaluate(() => window.dispatchEvent(new Event('touchcancel')));
+assert.deepEqual(
+  await page.evaluate(() => [
+    window.__tka.currentSteer(),
+    window.__tka.currentDrift(),
+    document.getElementById('leftBtn').classList.contains('active'),
+    document.getElementById('driftBtn').classList.contains('active'),
+  ]),
+  [0, false, false, false],
+  'window touchcancel did not clear active pointers and visual classes',
+);
+
+await page.evaluate(() => {
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift' }));
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'D' }));
+  window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift' }));
+  window.dispatchEvent(new KeyboardEvent('keyup', { key: 'd' }));
+});
+assert.deepEqual(
+  await page.evaluate(() => [window.__tka.currentSteer(), window.__tka.currentDrift(), window.__tka.keys.size]),
+  [0, false, 0],
+  'Shift+D followed by Shift release left uppercase key stuck',
+);
+
+await page.dispatchEvent('#rightBtn', 'pointerdown', { pointerId: 61, pointerType: 'touch', isPrimary: true, button: 0 });
+await page.dispatchEvent('#brakeBtn', 'pointerdown', { pointerId: 62, pointerType: 'touch', isPrimary: false, button: 0 });
+await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+assert.equal(await page.evaluate(() => window.__tka.state.paused), true, 'window blur did not pause');
+assert.deepEqual(await page.evaluate(() => [window.__tka.currentSteer(), window.__tka.currentBrake()]), [0, false], 'blur left controls active');
+await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+assert.equal(await page.evaluate(() => window.__tka.state.paused), true, 'window focus unexpectedly resumed');
+await page.locator('#resumeBtn').click();
+await page.evaluate(() => window.__tka.pauseLoop());
+
+// Finishing, pausing before 1400ms, and clicking Restart must NOT trigger stale showResults() 1.4s later.
+await page.evaluate(() => {
+  window.__tka.pauseLoop();
+  window.__tka.setAutopilot(true);
+  const eng = window.__tka.engine();
+  const st = eng.player.state;
+  st.lap = 2;
+  st.totalDistance = eng.race.track.length * 3 - 1.2;
+  st.speed = 30;
+  st.vx = Math.sin(st.heading) * 30;
+  st.vz = Math.cos(st.heading) * 30;
+  eng.resetFrameClock();
+  window.__tka.step(6, 16.67);
+});
+assert.equal(await page.evaluate(() => window.__tka.engine().race.phase), 'finished', 'autopilot did not reach finished phase');
+assert.equal(await page.evaluate(() => window.__tka.hasFinishTimeout()), true, 'finishTimeout was not armed on finish');
+await page.locator('#pauseBtn').click();
+assert.equal(await page.evaluate(() => window.__tka.hasFinishTimeout()), false, 'pause did not cancel finishTimeout');
+await page.locator('#restartBtn').click();
+assert.equal(await page.evaluate(() => window.__tka.state.paused), false, 'post-finish restart stayed paused');
+assert.equal(await page.evaluate(() => window.__tka.rafActive()), true, 'post-finish restart did not arm rAF');
+assert.equal(await page.evaluate(() => window.__tka.engine().race.phase), 'countdown', 'post-finish restart did not reset phase');
+assert.equal(await page.evaluate(() => window.__tka.hasFinishTimeout()), false, 'post-finish restart re-armed finishTimeout');
+await page.evaluate(() => window.__tka.pauseLoop());
+await page.waitForTimeout(1550);
+assert.equal(await page.evaluate(() => window.__tka.state.screen), 'race', 'stale finishTimeout killed the restarted race');
+assert.ok(await page.evaluate(() => !!window.__tka.engine()), 'engine disposed by stale finishTimeout');
+
 await page.locator('#pauseBtn').click();
 await page.locator('#quitBtn').click();
 assert.equal(await page.evaluate(() => window.__tka.state.screen), 'menu', 'menu principal action failed');
 assert.equal(await page.evaluate(() => window.__tka.engine()), null, 'menu action left a live engine');
+assert.equal(await page.evaluate(() => window.__tka.rafActive()), false, 'menu action left an active rAF');
+
+// Menu exit during the 60ms startup loader must cancel startTimeout and never leak an engine/rAF.
+await page.evaluate(() => {
+  window.__tka.start({ circuit: 1, quality: 'low' });
+  window.__tka.quit();
+});
+await page.waitForTimeout(160);
+assert.equal(await page.evaluate(() => window.__tka.state.screen), 'menu', 'abort during startup left menu');
+assert.equal(await page.evaluate(() => window.__tka.engine()), null, 'abort during startup leaked an engine');
+assert.equal(await page.evaluate(() => window.__tka.rafActive()), false, 'abort during startup leaked a rAF loop');
 
 assert.ok(await page.locator('#pauseBtn').isVisible());
 assert.equal(errors.length, 0, `browser errors: ${errors.join(' | ')}`);

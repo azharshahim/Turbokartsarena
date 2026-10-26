@@ -33,8 +33,23 @@ const keys = new Set<string>();
 const touch = { steer: 0, drift: false, brake: false }; // synthetic input used by the capture harness
 const touchPointers = new MultiTouchControls();
 const pointerTargets = new Map<number, HTMLElement>();
+let startTimeout = 0;
 let finishTimeout = 0;
+let gyroBound = false;
 const gyro = { enabled: false, rest: 0, angle: 0, active: false };
+
+function stopLoop() {
+  if (rafId !== 0) {
+    cancelAnimationFrame(rafId);
+    rafId = 0;
+  }
+}
+
+function startLoop() {
+  stopLoop();
+  if (!engine || state.paused || state.screen !== 'race') return;
+  rafId = requestAnimationFrame(loop);
+}
 
 /* ------------------------------------------------------------------ */
 /* Moteur                                                             */
@@ -61,6 +76,12 @@ function detectQuality(): QualityLevel {
 }
 
 function startEngine() {
+  stopLoop();
+  window.clearTimeout(finishTimeout);
+  finishTimeout = 0;
+  engine?.dispose();
+  engine = null;
+
   const stage = $('stage');
   stage.innerHTML = '';
   const canvas = document.createElement('canvas');
@@ -84,17 +105,31 @@ function startEngine() {
     onFinish: () => {
       window.clearTimeout(finishTimeout);
       finishTimeout = window.setTimeout(() => {
-        if (!state.paused) showResults();
+        finishTimeout = 0;
+        if (!state.paused && state.screen === 'race' && engine?.race.phase === 'finished') {
+          showResults();
+        }
       }, 1400);
     },
   });
 
   buildMinimap();
+  updateHud();
+  updatePlaces();
+  updateMinimap();
   engine.resetFrameClock();
-  rafId = requestAnimationFrame(loop);
+  if (state.paused || document.hidden) {
+    state.paused = true;
+    $('pause').classList.remove('hidden');
+    const s = engine.stats;
+    $('pauseStats').textContent = `${s.fps} FPS · ${s.particles} particules · rendu ×${s.pixelRatio.toFixed(2)} · qualité ${engine.quality.level}`;
+  } else {
+    startLoop();
+  }
 }
 
 function loop(t: number) {
+  rafId = 0;
   if (!engine || state.paused || state.screen !== 'race') return;
   engine.setInput({
     steer: currentSteer(),
@@ -103,14 +138,18 @@ function loop(t: number) {
     throttle: 1,
   });
   engine.frame(t);
+  if (!engine || state.paused || state.screen !== 'race') return;
   updateHud();
+  if (rafId !== 0) cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(loop);
 }
 
 function currentSteer() {
   let s = touchPointers.steer || touch.steer;
-  if (keys.has('ArrowLeft') || keys.has('q') || keys.has('a')) s = -1;
-  if (keys.has('ArrowRight') || keys.has('d')) s = 1;
+  const kLeft = keys.has('ArrowLeft') || keys.has('q') || keys.has('a');
+  const kRight = keys.has('ArrowRight') || keys.has('d');
+  if (kLeft !== kRight) s = kLeft ? -1 : 1;
+  else if (kLeft && kRight) s = 0;
   if (state.input === 'gyro' && gyro.active) {
     s = Math.max(-1, Math.min(1, (gyro.angle - gyro.rest) * 3.2));
   }
@@ -250,12 +289,16 @@ function showMenu() {
   state.screen = 'menu';
   state.paused = false;
   state.starting = false;
-  clearHeldInputs();
-  cancelAnimationFrame(rafId);
+  window.clearTimeout(startTimeout);
+  startTimeout = 0;
   window.clearTimeout(finishTimeout);
+  finishTimeout = 0;
+  clearHeldInputs();
+  stopLoop();
   engine?.dispose();
   engine = null;
   $('stage').innerHTML = '';
+  $('loading').classList.add('hidden');
   $('menu').classList.remove('hidden');
   $('results').classList.add('hidden');
   $('pause').classList.add('hidden');
@@ -267,9 +310,12 @@ function showMenu() {
 function startRace() {
   if (state.starting || state.screen === 'race') return;
   state.starting = true;
-  clearHeldInputs();
-  cancelAnimationFrame(rafId);
+  window.clearTimeout(startTimeout);
+  startTimeout = 0;
   window.clearTimeout(finishTimeout);
+  finishTimeout = 0;
+  clearHeldInputs();
+  stopLoop();
   engine?.dispose();
   engine = null;
   state.screen = 'race';
@@ -281,7 +327,13 @@ function startRace() {
   $('hud').classList.add('live');
   $('loading').classList.remove('hidden');
   // laisse le navigateur peindre le loader avant de générer les textures
-  window.setTimeout(() => {
+  startTimeout = window.setTimeout(() => {
+    startTimeout = 0;
+    if (state.screen !== 'race') {
+      state.starting = false;
+      $('loading').classList.add('hidden');
+      return;
+    }
     try {
       startEngine();
     } finally {
@@ -292,11 +344,15 @@ function startRace() {
 }
 
 function showResults() {
-  if (!engine || state.screen !== 'race') return;
+  if (!engine || state.screen !== 'race' || engine.race.phase !== 'finished') return;
   state.screen = 'results';
   state.paused = false;
+  window.clearTimeout(startTimeout);
+  startTimeout = 0;
+  window.clearTimeout(finishTimeout);
+  finishTimeout = 0;
   clearHeldInputs();
-  cancelAnimationFrame(rafId);
+  stopLoop();
   $('pause').classList.add('hidden');
   document.body.classList.remove('racing');
   const p = engine.player.state;
@@ -371,24 +427,45 @@ bind('fpsToggle', 'click', () => {
   state.showFps = !state.showFps;
   renderMenu();
 });
+function restartRace() {
+  if (!engine || state.screen !== 'race') return;
+  window.clearTimeout(finishTimeout);
+  finishTimeout = 0;
+  clearHeldInputs();
+  engine.restart();
+  engine.resetFrameClock();
+  if (state.paused) {
+    state.paused = false;
+    $('pause').classList.add('hidden');
+  }
+  updateHud();
+  updatePlaces();
+  updateMinimap();
+  startLoop();
+}
+
 bind('playBtn', 'click', startRace);
 bind('againBtn', 'click', startRace);
 bind('menuBtn', 'click', showMenu);
 bind('resumeBtn', 'click', () => togglePause(false));
-bind('restartBtn', 'click', () => {
-  togglePause(false);
-  engine?.restart();
-});
+bind('restartBtn', 'click', restartRace);
 bind('quitBtn', 'click', showMenu);
 bind('pauseBtn', 'click', () => togglePause(true));
 
-/* état neutre garanti après pause, perte de focus ou annulation tactile */
-function clearHeldInputs() {
-  keys.clear();
+function releasePointerTarget(pointerId: number) {
+  const target = pointerTargets.get(pointerId);
+  const released = touchPointers.release(pointerId);
+  if (!target) return released;
+  pointerTargets.delete(pointerId);
+  if (![...pointerTargets.values()].includes(target)) target.classList.remove('active');
+  try {
+    if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId);
+  } catch { /* le navigateur a déjà annulé la capture */ }
+  return true;
+}
+
+function clearTouchPointers() {
   touchPointers.clear();
-  touch.steer = 0;
-  touch.drift = false;
-  touch.brake = false;
   const captures = Array.from(pointerTargets.entries());
   pointerTargets.clear();
   for (const [pointerId, element] of captures) {
@@ -397,7 +474,17 @@ function clearHeldInputs() {
       if (element.hasPointerCapture(pointerId)) element.releasePointerCapture(pointerId);
     } catch { /* le navigateur a déjà annulé la capture */ }
   }
+}
+
+/* état neutre garanti après pause, perte de focus ou annulation tactile */
+function clearHeldInputs() {
+  keys.clear();
+  touch.steer = 0;
+  touch.drift = false;
+  touch.brake = false;
+  clearTouchPointers();
   gyro.rest = gyro.angle;
+  engine?.setInput({ steer: 0, drift: false, brake: false, throttle: 1 });
 }
 
 /* commandes Pointer Events avec capture : plusieurs doigts restent indépendants */
@@ -416,21 +503,27 @@ const hold = (id: string, action: TouchAction) => {
   const end = (event: Event) => {
     const e = event as PointerEvent;
     e.preventDefault();
-    const target = pointerTargets.get(e.pointerId);
-    if (!target) return;
-    touchPointers.release(e.pointerId);
-    pointerTargets.delete(e.pointerId);
-    if (![...pointerTargets.values()].includes(target)) target.classList.remove('active');
+    releasePointerTarget(e.pointerId);
   };
   el.addEventListener('pointerdown', start);
   el.addEventListener('pointerup', end);
   el.addEventListener('pointercancel', end);
   el.addEventListener('lostpointercapture', end);
+  el.addEventListener('contextmenu', (e) => e.preventDefault());
 };
 hold('leftBtn', 'left');
 hold('rightBtn', 'right');
 hold('driftBtn', 'drift');
 hold('brakeBtn', 'brake');
+
+window.addEventListener('pointerup', (e) => releasePointerTarget(e.pointerId));
+window.addEventListener('pointercancel', (e) => releasePointerTarget(e.pointerId));
+window.addEventListener('touchcancel', () => {
+  clearTouchPointers();
+  engine?.setInput({ steer: currentSteer(), drift: currentDrift(), brake: currentBrake(), throttle: 1 });
+});
+
+const normalizeKey = (k: string) => (k.length === 1 ? k.toLowerCase() : k);
 
 /* clavier */
 window.addEventListener('keydown', (e) => {
@@ -444,17 +537,24 @@ window.addEventListener('keydown', (e) => {
   }
   if (state.screen !== 'race' || state.paused || e.repeat) return;
   if (e.key === ' ') e.preventDefault();
-  keys.add(e.key);
+  keys.add(normalizeKey(e.key));
 });
-window.addEventListener('keyup', (e) => keys.delete(e.key));
+window.addEventListener('keyup', (e) => keys.delete(normalizeKey(e.key)));
 window.addEventListener('blur', () => {
   clearHeldInputs();
   if (state.screen === 'race') togglePause(true);
 });
+window.addEventListener('focus', () => {
+  clearHeldInputs();
+});
+window.addEventListener('pagehide', () => {
+  clearHeldInputs();
+  if (state.screen === 'race') togglePause(true);
+});
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    clearHeldInputs();
-    if (state.screen === 'race') togglePause(true);
+  clearHeldInputs();
+  if (document.hidden && state.screen === 'race') {
+    togglePause(true);
   }
 });
 
@@ -473,33 +573,50 @@ async function enableGyro() {
       return;
     }
   }
-  window.addEventListener('deviceorientation', (ev) => {
-    if (ev.gamma === null) return;
-    gyro.active = true;
-    gyro.angle = (((ev.gamma ?? 0) * Math.PI) / 180) * 1.6;
-  });
+  if (!gyroBound) {
+    gyroBound = true;
+    window.addEventListener('deviceorientation', (ev) => {
+      if (ev.gamma === null) return;
+      gyro.angle = (((ev.gamma ?? 0) * Math.PI) / 180) * 1.6;
+      if (state.input === 'gyro') gyro.active = true;
+    });
+  }
+  gyro.active = true;
   gyro.rest = gyro.angle;
   toast('Gyroscope : inclinez pour tourner', '#40c8ff', 1800);
 }
 
 function togglePause(v: boolean) {
-  if (state.screen !== 'race' || !engine || state.paused === v) return;
+  if (state.screen !== 'race' || state.paused === v) return;
+  if (!engine) {
+    if (state.starting && v) {
+      state.paused = true;
+      clearHeldInputs();
+      $('pause').classList.remove('hidden');
+    }
+    return;
+  }
   state.paused = v;
   clearHeldInputs();
   engine.resetFrameClock();
   $('pause').classList.toggle('hidden', !v);
   if (v) {
-    cancelAnimationFrame(rafId);
-    rafId = 0;
-    if (engine.race.phase === 'finished') window.clearTimeout(finishTimeout);
+    stopLoop();
+    window.clearTimeout(finishTimeout);
+    finishTimeout = 0;
     const s = engine.stats;
     $('pauseStats').textContent = `${s.fps} FPS · ${s.particles} particules · rendu ×${s.pixelRatio.toFixed(2)} · qualité ${engine.quality.level}`;
   } else {
     if (engine.race.phase === 'finished') {
       window.clearTimeout(finishTimeout);
-      finishTimeout = window.setTimeout(showResults, 1400);
+      finishTimeout = window.setTimeout(() => {
+        finishTimeout = 0;
+        if (!state.paused && state.screen === 'race' && engine?.race.phase === 'finished') {
+          showResults();
+        }
+      }, 1400);
     }
-    rafId = requestAnimationFrame(loop);
+    startLoop();
   }
 }
 
@@ -520,12 +637,16 @@ $('loading').classList.add('hidden');
     if (opts?.quality) state.quality = opts.quality;
     startRace();
   },
+  quit: showMenu,
+  restart: restartRace,
   engine: () => engine,
   state,
   togglePause,
   currentSteer,
   currentDrift,
   currentBrake,
+  rafActive: () => rafId !== 0,
+  hasFinishTimeout: () => finishTimeout !== 0,
   skipCountdown: () => {
     if (engine) (engine.race as any).countdown = 0.01;
   },
@@ -536,11 +657,8 @@ $('loading').classList.add('hidden');
   },
   keys,
   /** Arrête la boucle rAF (les captures automatisées rendent alors frame par frame). */
-  pauseLoop: () => cancelAnimationFrame(rafId),
-  resumeLoop: () => {
-    cancelAnimationFrame(rafId);
-    rafId = requestAnimationFrame(loop);
-  },
+  pauseLoop: () => stopLoop(),
+  resumeLoop: () => startLoop(),
   /** Mode démo : le kart du joueur est piloté par l'IA. */
   setAutopilot: (v: boolean) => {
     if (engine) engine.autopilot = v;

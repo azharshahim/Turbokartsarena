@@ -3,6 +3,8 @@ name: Android APK
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -22,9 +24,14 @@ jobs:
           distribution: temurin
           java-version: 17
       - run: npm ci
+      - run: npm run typecheck
       - run: npm test
+      - run: npm run preview:build
+      - name: Installer Chromium pour Playwright
+        run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
       - run: npx expo prebuild --platform android --no-install
-      - name: Build APK (release, signé avec la clé debug : installable directement)
+      - name: "Build APK (release, signé avec la clé debug : installable directement)"
         working-directory: android
         run: ./gradlew assembleRelease --no-daemon
       - name: Renommer l'APK
@@ -34,6 +41,7 @@ jobs:
           name: turbo-karts-arena-apk
           path: turbo-karts-arena.apk
       - name: Publier dans les Releases
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: android-latest
