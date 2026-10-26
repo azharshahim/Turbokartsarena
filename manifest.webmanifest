@@ -1,0 +1,19 @@
+{
+  "name": "Turbo Karts Arena",
+  "short_name": "Turbo Karts",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#070a16",
+  "theme_color": "#070a16",
+  "orientation": "landscape",
+  "description": "Jeu de course de karts arcade 3D.",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
