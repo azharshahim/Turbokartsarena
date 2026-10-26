@@ -1,0 +1,21 @@
+# Dependencies & generated output
+node_modules/
+.expo/
+.preview/
+preview/dist/
+dist/
+build/
+coverage/
+*.log
+
+# Local environment / credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/

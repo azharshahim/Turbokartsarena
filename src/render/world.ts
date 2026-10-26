@@ -1,0 +1,640 @@
+/**
+ * Turbo Karts Arena — moteur de rendu PARTAGÉ.
+ *
+ * Ce fichier est utilisé tel quel par :
+ *   • l'application Android (expo-gl + Hermes)
+ *   • la preview web (react-free, canvas WebGL2)
+ *
+ * Il assemble : ciel HDR → environnement PBR préconvolué → piste → décor →
+ * karts → particules → post-traitement, et pilote la caméra de course.
+ *
+ * Optimisations 60 FPS :
+ *   • réduction dynamique de résolution (jusqu'à la résolution native de l'écran)
+ *   • pooling des particules, matériaux et géométries partagés
+ *   • InstancedMesh pour la végétation, la foule et les barrières
+ *   • ombres douces PCF avec carte de taille adaptée au palier
+ *   • un seul render target de post-traitement + bloom préfiltré
+ */
+
+import * as THREE from 'three';
+import { Race } from '../core/race';
+import { makeBrain, thinkAi, type AiBrain } from '../core/ai';
+import type { DriveInput } from '../core/kart';
+import { clamp, damp, dampAngle, lerp, smoothstep } from '../core/math';
+import { PHYSICS, type QualitySettings } from '../core/config';
+import type { Circuit, CircuitTheme } from '../game/circuits';
+import { THEMES } from '../game/circuits';
+import type { KartProfile } from '../game/roster';
+import { buildTrackMesh, type TrackMesh } from './trackMesh';
+import { createKart, createMaterials, createScenery, type KartModel, type MaterialLibrary, type SceneryResult } from './models';
+import { createPostFX, type PostFX } from './postfx';
+import { EffectsRegistry } from './particles';
+import { buildEnvironment, SkyDome } from './sky';
+import { glowTexture, smokeTexture } from './textures';
+
+export interface EngineOptions {
+  /** Contexte WebGL (expo-gl) ou null si `canvas` est fourni. */
+  gl: WebGLRenderingContext | WebGL2RenderingContext | any;
+  canvas: HTMLCanvasElement | any | null;
+  width: number;
+  height: number;
+  pixelRatio: number;
+  quality: QualitySettings;
+  circuit: Circuit;
+  profile: KartProfile;
+  laps: number;
+  onFrame?: (dt: number) => void;
+  onFinish?: () => void;
+}
+
+interface KartVisual {
+  model: KartModel;
+  wheelSpin: number;
+  steerVisual: number;
+  boostLightPower: number;
+  spinVel: number[];
+}
+
+export class PhysicsEngine {
+  readonly race: Race;
+  readonly renderer: THREE.WebGLRenderer;
+  readonly scene = new THREE.Scene();
+  readonly camera: THREE.PerspectiveCamera;
+  quality: QualitySettings;
+  circuit: Circuit;
+  theme: CircuitTheme;
+
+  private postfx: PostFX;
+  private sky: SkyDome;
+  private materials: MaterialLibrary;
+  private scenery: SceneryResult;
+  private trackMesh: TrackMesh;
+  private effects: EffectsRegistry;
+  private kartVisuals: KartModel[] = [];
+  private visuals: KartVisual[] = [];
+  private sun: THREE.DirectionalLight;
+  private fill: THREE.DirectionalLight;
+  private hemi: THREE.HemisphereLight;
+  private input: DriveInput = { steer: 0, drift: false, brake: false, throttle: 1 };
+
+  /* caméra / ressenti */
+  private camPos = new THREE.Vector3();
+  private camLook = new THREE.Vector3();
+  private camYaw = 0;
+  private shake = 0;
+  private camFov = 62;
+  private lastTime = 0;
+  private elapsed = 0;
+  private disposeFns: Array<() => void> = [];
+  private terrain: THREE.Mesh | null = null;
+
+  /* résolution dynamique */
+  private targetPixelRatio: number;
+  private currentPixelRatio: number;
+  private frameAvg = 1 / 60;
+  private resizeCooldown = 0;
+  private width: number;
+  private height: number;
+  private isNative: boolean;
+
+  /* HUD / événements à remonter */
+  private finishedFired = false;
+
+  constructor(opts: EngineOptions) {
+    this.circuit = opts.circuit;
+    this.theme = THEMES[opts.circuit.themeId] ?? THEMES.coast;
+    this.quality = opts.quality;
+    this.width = opts.width;
+    this.height = opts.height;
+    this.isNative = !!opts.gl && !opts.canvas;
+    this.targetPixelRatio = clamp(opts.pixelRatio, 0.6, opts.quality.pixelRatioCap);
+    this.currentPixelRatio = this.targetPixelRatio;
+
+    /* ---------------- renderer ---------------- */
+    const canvas = opts.canvas ?? makeCanvasShim(opts.gl);
+    this.renderer = new THREE.WebGLRenderer({
+      canvas,
+      context: opts.gl,
+      antialias: false, // on gère l'AA par le post-traitement / le MSAA du render target
+      alpha: false,
+      powerPreference: 'high-performance',
+      stencil: false,
+      depth: true,
+    });
+    this.renderer.setPixelRatio(this.currentPixelRatio);
+    this.renderer.setSize(this.width, this.height, false);
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 0.88;
+    this.renderer.shadowMap.enabled = this.quality.shadows;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.setClearColor(0x0a0f1e, 1);
+
+    const maxRes = this.quality.maxPixels;
+    const px = this.width * this.height * this.currentPixelRatio * this.currentPixelRatio;
+    if (px > maxRes) {
+      this.currentPixelRatio *= Math.sqrt(maxRes / px);
+      this.renderer.setPixelRatio(this.currentPixelRatio);
+    }
+
+    /* ---------------- scène ---------------- */
+    this.camera = new THREE.PerspectiveCamera(this.camFov, this.width / this.height, 0.4, this.quality.drawDistance * 1.6);
+    this.scene.fog = new THREE.FogExp2(this.theme.fogColor, this.theme.fogDensity);
+
+    this.sky = new SkyDome(this.theme);
+    this.scene.add(this.sky.mesh);
+
+    /* environnement PBR préconvolué (reflets réalistes sans fichier HDR) */
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    pmrem.compileCubemapShader();
+    const env = buildEnvironment(this.renderer, this.theme, pmrem, this.quality.level === 'ultra' ? 256 : 128);
+    this.scene.environment = env.texture;
+    this.scene.environmentIntensity = this.theme.mood === 'night' ? 0.4 : 0.45;
+    this.disposeFns.push(() => {
+      env.texture.dispose();
+      pmrem.dispose();
+    });
+
+    /* ---------------- lumières ---------------- */
+    this.hemi = new THREE.HemisphereLight(this.theme.hemiSky, this.theme.hemiGround, this.theme.hemiIntensity);
+    this.scene.add(this.hemi);
+
+    this.sun = new THREE.DirectionalLight(this.theme.sunColor, this.theme.sunIntensity);
+    const sd = this.theme.sunDir;
+    this.sun.position.set(sd[0] * 120, sd[1] * 140, sd[2] * 120);
+    this.sun.castShadow = this.quality.shadows;
+    if (this.quality.shadows) {
+      const s = this.quality.shadowMapSize;
+      this.sun.shadow.mapSize.set(s, s);
+      this.sun.shadow.camera.near = 20;
+      this.sun.shadow.camera.far = 380;
+      const span = 70;
+      const cam = this.sun.shadow.camera as THREE.OrthographicCamera;
+      cam.left = -span;
+      cam.right = span;
+      cam.top = span;
+      cam.bottom = -span;
+      cam.updateProjectionMatrix();
+      this.sun.shadow.bias = -0.0008;
+      this.sun.shadow.normalBias = 0.04;
+      this.sun.shadow.radius = this.quality.level === 'ultra' ? 3.2 : 2;
+    }
+    this.scene.add(this.sun);
+    this.scene.add(this.sun.target);
+
+    // Lumière d'appoint : évite les carrosseries "sales" dans l'ombre et donne
+    // du volume aux karts sans coûter d'ombre supplémentaire.
+    this.fill = new THREE.DirectionalLight(0xdfe9ff, this.theme.mood === 'night' ? 0.55 : 0.55);
+    this.fill.position.set(-60, 40, -80);
+    this.scene.add(this.fill);
+    this.scene.add(this.fill.target);
+
+    /* ---------------- course ---------------- */
+    this.race = new Race({ circuit: opts.circuit, playerProfile: opts.profile, opponents: 5 });
+    void opts.laps;
+
+    /* ---------------- matériaux / géométries ---------------- */
+    this.materials = createMaterials(this.theme, this.quality);
+    /* sol : grand disque de terrain, adapté au thème, avec micro-relief */
+    const terrainGeo = new THREE.PlaneGeometry(1500, 1500, 110, 110);
+    terrainGeo.rotateX(-Math.PI / 2);
+    const pos = terrainGeo.getAttribute('position') as THREE.BufferAttribute;
+    const track = this.race.track;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const z = pos.getZ(i);
+      // Le terrain épouse la piste (talus) puis devient colline au loin :
+      // la route n'est jamais enterrée ni suspendue.
+      const h = track.groundHeight(x, z);
+      pos.setY(i, h - 0.12);
+    }
+    terrainGeo.computeVertexNormals();
+    const groundMesh = new THREE.Mesh(terrainGeo, this.materials.grass);
+    groundMesh.receiveShadow = this.quality.shadows;
+    groundMesh.position.y = -0.02;
+    this.scene.add(groundMesh);
+    this.terrain = groundMesh;
+
+    this.trackMesh = buildTrackMesh(this.race.track, this.materials, this.quality, {
+      curbColors: this.theme.curbColors,
+      id: this.theme.id,
+    });
+    this.scene.add(this.trackMesh.group);
+
+    const trackPoints = this.race.track.samples.map((s) => ({
+      x: s.x,
+      y: s.y,
+      z: s.z,
+      tx: s.tx,
+      tz: s.tz,
+      rx: s.rx,
+      rz: s.rz,
+      halfWidth: s.halfWidth,
+    }));
+    this.scenery = createScenery(this.theme, this.materials, this.quality, trackPoints, opts.circuit.seed);
+    this.scene.add(this.scenery.group);
+
+    /* ---------------- karts ---------------- */
+    for (const kart of this.race.karts) {
+      const model = createKart(
+        // l'IA utilise le profil du roster d'origine
+        kart.profile,
+        this.materials,
+        this.quality,
+      );
+      this.kartVisuals.push(model);
+      this.visuals.push({
+        model,
+        wheelSpin: 0,
+        steerVisual: 0,
+        boostLightPower: 0,
+        spinVel: model.wheels.map(() => 0),
+      });
+      this.scene.add(model.root);
+    }
+
+    /* ---------------- particules ---------------- */
+    const smokeTex = smokeTexture(this.quality.level === 'low' ? 64 : 128).albedo;
+    const glowTex = glowTexture(this.quality.level === 'low' ? 64 : 128).albedo;
+    this.effects = new EffectsRegistry({ smoke: smokeTex, glow: glowTex }, this.quality.particleBudget);
+    for (const p of this.effects.all()) this.scene.add(p.points);
+
+    /* ---------------- post-traitement ---------------- */
+    this.postfx = createPostFX(this.renderer, this.scene, this.camera, this.quality);
+    this.postfx.setSize(this.width, this.height, this.currentPixelRatio);
+
+    /* ---------------- caméra initiale ---------------- */
+    const p = this.race.player.state;
+    this.camPos.set(p.x - Math.sin(p.heading) * 8, p.y + 4, p.z - Math.cos(p.heading) * 8);
+    this.camYaw = p.heading;
+    this.camera.position.copy(this.camPos);
+    this.scene.add(this.camera);
+
+    this.onFinish = opts.onFinish;
+    this.onFrame = opts.onFrame;
+  }
+
+  onFinish?: () => void;
+  onFrame?: (dt: number) => void;
+  /** Mode démo : l'IA pilote aussi le kart du joueur. */
+  autopilot = false;
+  private autopilotBrain: AiBrain = makeBrain(() => Math.random(), 0.9);
+
+  /* ------------------------------------------------------------------ */
+  /* Entrées                                                            */
+  /* ------------------------------------------------------------------ */
+
+  setInput(input: Partial<DriveInput>) {
+    if (input.steer !== undefined) this.input.steer = clamp(input.steer, -1, 1);
+    if (input.drift !== undefined) this.input.drift = input.drift;
+    if (input.brake !== undefined) this.input.brake = input.brake;
+    if (input.throttle !== undefined) this.input.throttle = clamp(input.throttle, 0, 1);
+  }
+
+  get player() {
+    return this.race.player;
+  }
+
+  restart() {
+    this.race.reset();
+    this.race.phase = 'countdown';
+    this.finishedFired = false;
+    const p = this.race.player.state;
+    this.camPos.set(p.x - Math.sin(p.heading) * 8, p.y + 4, p.z - Math.cos(p.heading) * 8);
+    this.camYaw = p.heading;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Boucle                                                             */
+  /* ------------------------------------------------------------------ */
+
+  frame(timeMs: number) {
+    const t = timeMs * 0.001;
+    let dt = this.lastTime === 0 ? 1 / 60 : t - this.lastTime;
+    this.lastTime = t;
+    dt = clamp(dt, 1 / 240, 0.1);
+    this.elapsed += dt;
+
+    /* ---- simulation (pas fixe interne) ---- */
+    const playerInput = this.autopilot
+      ? thinkAi(this.race.player, this.autopilotBrain, this.race.track, dt, this.elapsed, this.race.karts)
+      : this.input;
+    this.race.update(dt, { player: playerInput });
+    this.consumeEvents();
+
+    /* ---- visuels ---- */
+    this.syncKarts(dt);
+    this.updateCamera(dt);
+    this.sky.update(this.camera, this.elapsed);
+    this.trackMesh.update(this.elapsed, 1);
+
+    for (const a of this.scenery.animated) {
+      if (a.kind === 'bob') {
+        a.obj.position.y += Math.sin(this.elapsed * a.speed + a.phase) * dt * 0.6;
+        a.obj.rotation.y += dt * a.speed;
+      } else if (a.kind === 'flag') {
+        a.obj.rotation.y = Math.sin(this.elapsed * a.speed + a.phase) * 0.35;
+      }
+    }
+
+    this.effects.update(dt);
+    this.updatePostFX(dt);
+
+    /* ---- rendu ---- */
+    this.postfx.render(dt);
+    const gl = this.renderer.getContext() as any;
+    if (this.isNative && typeof gl.endFrameEXP === 'function') gl.endFrameEXP();
+
+    /* ---- résolution dynamique ---- */
+    this.frameAvg = lerp(this.frameAvg, dt, 0.08);
+    this.adaptResolution(dt);
+
+    this.onFrame?.(dt);
+  }
+
+  private consumeEvents() {
+    const evts = this.race.events;
+    for (let i = 0; i < evts.length; i++) {
+      const e = evts[i];
+      const isPlayer = (id: number) => id === this.race.player.state.id;
+      switch (e.type) {
+        case 'impact': {
+          this.effects.impact(e.x, e.y, e.z, e.power);
+          if (isPlayer(e.kartId) || isPlayer((e as any).otherId)) this.shake = Math.min(1, this.shake + e.power * 0.06);
+          break;
+        }
+        case 'pad':
+        case 'boost': {
+          if (isPlayer(e.kartId)) this.shake = Math.max(this.shake, 0.18);
+          break;
+        }
+        case 'finish': {
+          if (isPlayer(e.kartId) && !this.finishedFired) {
+            this.finishedFired = true;
+            const s = this.race.player.state;
+            this.effects.finishBurst(s.x, s.y, s.z);
+            this.onFinish?.();
+          }
+          break;
+        }
+        case 'lap': {
+          // le HUD lit directement l'état de course ; rien à mémoriser ici
+          break;
+        }
+        default:
+          break;
+      }
+    }
+    evts.length = 0;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Synchronisation visuelle des karts                                 */
+  /* ------------------------------------------------------------------ */
+
+  private syncKarts(dt: number) {
+    for (let i = 0; i < this.race.karts.length; i++) {
+      const kart = this.race.karts[i];
+      const st = kart.state;
+      const model = this.kartVisuals[i];
+      const vis = this.visuals[i];
+      if (!model) continue;
+
+      // LOD : au-delà de 42 m (ou hors qualité haute) on affiche la silhouette simple
+      const distToCam = this.camera.position.distanceTo(model.root.position);
+      const useLod = distToCam > 42 || (this.quality.level === 'low' && distToCam > 26);
+      model.body.visible = !useLod;
+      model.lod.visible = useLod;
+      model.root.position.set(st.x, st.y, st.z);
+      model.root.rotation.y = st.heading + st.visualYawSlip;
+      model.body.rotation.z = st.visualRoll;
+      model.body.rotation.x = st.visualPitch;
+      model.body.position.y = st.hop + st.bounce * 0.12;
+
+      // roues : rotation + braquage
+      vis.wheelSpin += (st.speed / 0.42) * dt;
+      const steerAngle = damp(vis.steerVisual, st.steer * 0.5 + (st.drifting ? st.driftDir * 0.16 : 0), 12, dt);
+      vis.steerVisual = steerAngle;
+      for (let w = 0; w < model.wheels.length; w++) {
+        model.wheels[w].rotation.x = vis.wheelSpin;
+      }
+      for (const fw of model.frontWheels) fw.rotation.y = steerAngle;
+
+      // pilote : se penche dans les virages
+      model.driver.body.rotation.z = -st.steer * 0.22;
+      model.driver.head.rotation.y = st.steer * 0.3;
+
+      // lumière de turbo
+      const boosting = kart.isBoosting;
+      const tier = st.boostTier;
+      vis.boostLightPower = damp(vis.boostLightPower, boosting ? 1 : 0, boosting ? 16 : 6, dt);
+      const lightMat = model.boostLight.material as THREE.MeshBasicMaterial;
+      const col = tier >= 3 ? 0xc65cff : tier === 2 ? 0xff9a2e : 0x40c8ff;
+      lightMat.color.setHex(col);
+      lightMat.opacity = vis.boostLightPower * 0.95;
+      const ls = 0.8 + vis.boostLightPower * (1.4 + Math.random() * 0.5);
+      model.boostLight.scale.setScalar(ls);
+
+      // particules
+      const fwdX = Math.sin(st.heading);
+      const fwdZ = Math.cos(st.heading);
+      const rightX = -Math.cos(st.heading);
+      const rightZ = Math.sin(st.heading);
+      if (st.drifting) {
+        this.effects.driftTrail(st.x, st.y, st.z, rightX, rightZ, Math.abs(st.speed), st.driftTier, dt);
+      }
+      if (boosting && Math.random() < 0.9) {
+        this.effects.boostJet(st.x, st.y, st.z, fwdX, fwdZ, tier);
+      }
+      if (st.surface === 'grass' && Math.abs(st.speed) > 6) {
+        this.effects.offRoadDust(st.x, st.y, st.z, Math.abs(st.speed), dt);
+      }
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Caméra                                                            */
+  /* ------------------------------------------------------------------ */
+
+  private updateCamera(dt: number) {
+    const kart = this.race.player;
+    const st = kart.state;
+    const speed = Math.abs(st.speed);
+    const speedNorm = clamp(speed / PHYSICS.kart.maxSpeed, 0, 1.4);
+
+    // orientation lissée de la caméra : suit le cap mais "regarde" un peu plus loin
+    const headingTarget = st.heading + st.visualYawSlip * 0.55;
+    this.camYaw = dampAngle(this.camYaw, headingTarget, st.drifting ? 5.5 : 7.5, dt);
+
+    const back = 5.9 + speedNorm * 1.5;
+    const up = 2.55 + speedNorm * 0.4;
+    const fwdX = Math.sin(this.camYaw);
+    const fwdZ = Math.cos(this.camYaw);
+
+    const desired = new THREE.Vector3(st.x - fwdX * back, st.y + up, st.z - fwdZ * back);
+    // la caméra ne traverse pas le sol de la piste
+    const groundY = this.race.track.query(desired.x, desired.z, st.trackIndex).y;
+    desired.y = Math.max(desired.y, groundY + 1.5);
+
+    const stiffness = st.drifting ? 9 : 12;
+    this.camPos.x = damp(this.camPos.x, desired.x, stiffness, dt);
+    this.camPos.y = damp(this.camPos.y, desired.y, stiffness * 0.75, dt);
+    this.camPos.z = damp(this.camPos.z, desired.z, stiffness, dt);
+
+    // tremblement d'impact
+    this.shake = Math.max(0, this.shake - dt * 2.2);
+    const shakeAmp = this.shake * 0.28;
+    this.camera.position.set(
+      this.camPos.x + (Math.random() - 0.5) * shakeAmp,
+      this.camPos.y + (Math.random() - 0.5) * shakeAmp,
+      this.camPos.z + (Math.random() - 0.5) * shakeAmp,
+    );
+
+    const lookAhead = 9 + speedNorm * 6;
+    this.camLook.set(
+      st.x + Math.sin(st.heading) * lookAhead,
+      st.y + 1.25,
+      st.z + Math.cos(st.heading) * lookAhead,
+    );
+    this.camera.lookAt(this.camLook);
+
+    // FOV dynamique : effet de vitesse + coup de zoom au turbo
+    const boost = kart.isBoosting ? 1 : 0;
+    const fovTarget = 60 + speedNorm * 8 + boost * 6 + (st.drifting ? 2 : 0);
+    this.camFov = damp(this.camFov, fovTarget, 4.5, dt);
+    if (Math.abs(this.camera.fov - this.camFov) > 0.05) {
+      this.camera.fov = this.camFov;
+      this.camera.updateProjectionMatrix();
+    }
+
+    this.fill.position.set(
+      st.x - Math.sin(st.heading) * 60,
+      st.y + 45,
+      st.z - Math.cos(st.heading) * 60,
+    );
+    this.fill.target.position.set(st.x, st.y, st.z);
+    this.fill.target.updateMatrixWorld();
+
+    // le soleil suit le joueur pour garder des ombres nettes partout
+    if (this.quality.shadows) {
+      const sd = this.theme.sunDir;
+      this.sun.position.set(st.x + sd[0] * 120, st.y + sd[1] * 140, st.z + sd[2] * 120);
+      this.sun.target.position.set(st.x, st.y, st.z);
+      this.sun.target.updateMatrixWorld();
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Post-traitement piloté par l'état de course                        */
+  /* ------------------------------------------------------------------ */
+
+  private updatePostFX(dt: number) {
+    const kart = this.race.player;
+    const st = kart.state;
+    const speedNorm = clamp(Math.abs(st.speed) / (PHYSICS.kart.maxSpeed * 1.25), 0, 1);
+    const u = this.postfx.speedPass.uniforms;
+    u.uTime.value = this.elapsed;
+    u.uSpeed.value = damp(u.uSpeed.value as number, speedNorm, 6, dt);
+    u.uBoost.value = damp(u.uBoost.value as number, kart.isBoosting ? 1 : 0, 8, dt);
+    u.uBoostTier.value = st.boostTier;
+    u.uFlash.value = damp(u.uFlash.value as number, st.driftReleasedTime > 0 ? 0.16 : 0, 14, dt);
+    const flashCol = st.boostTier >= 3 ? 0xc65cff : st.boostTier === 2 ? 0xff9a2e : 0x40c8ff;
+    (u.uFlashColor.value as THREE.Color).setHex(flashCol);
+    // aberration qui monte avec la vitesse
+    u.uAberration.value = this.quality.chromatic ? 0.0012 + speedNorm * 0.0022 : 0;
+    if (this.postfx.bloomPass) {
+      this.postfx.bloomPass.strength =
+        this.quality.bloomStrength * (0.7 + speedNorm * 0.35 + (kart.isBoosting ? 0.45 : 0));
+    }
+    this.effects.setSizeScale(this.height * this.currentPixelRatio * 0.5);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Résolution dynamique                                               */
+  /* ------------------------------------------------------------------ */
+
+  private adaptResolution(dt: number) {
+    this.resizeCooldown -= dt;
+    const target = 1 / 60;
+    // tolérance : on ne réagit qu'aux vraies baisses durables
+    if (this.resizeCooldown > 0) return;
+    if (this.frameAvg > target * 1.28 && this.currentPixelRatio > 0.62) {
+      this.currentPixelRatio = Math.max(0.62, this.currentPixelRatio * 0.9);
+      this.applyResolution();
+    } else if (this.frameAvg < target * 0.86 && this.currentPixelRatio < this.targetPixelRatio) {
+      this.currentPixelRatio = Math.min(this.targetPixelRatio, this.currentPixelRatio * 1.05);
+      this.applyResolution();
+    }
+  }
+
+  private applyResolution() {
+    this.renderer.setPixelRatio(this.currentPixelRatio);
+    this.postfx.setSize(this.width, this.height, this.currentPixelRatio);
+    this.resizeCooldown = 0.5;
+  }
+
+  /** Appelé par l'hôte lors d'une rotation / changement de taille. */
+  resize(width: number, height: number) {
+    this.width = width;
+    this.height = height;
+    this.camera.aspect = width / height;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(width, height, false);
+    this.postfx.setSize(width, height, this.currentPixelRatio);
+  }
+
+  /* ------------------------------------------------------------------ */
+
+  get stats() {
+    const k = this.race.player;
+    return {
+      speed: Math.round(k.kmh),
+      tier: k.state.driftTier,
+      charge: k.driftChargeRatio,
+      boosting: k.isBoosting,
+      place: k.state.place,
+      lap: k.state.lap,
+      phase: this.race.phase,
+      fps: Math.round(1 / Math.max(1e-3, this.frameAvg)),
+      pixelRatio: this.currentPixelRatio,
+      particles: this.effects.all().reduce((a, p) => a + p.activeCount, 0),
+    };
+  }
+
+  dispose() {
+    for (const fn of this.disposeFns) fn();
+    for (const m of this.kartVisuals) {
+      m.dispose();
+      this.scene.remove(m.root);
+    }
+    this.effects.dispose();
+    this.trackMesh.dispose();
+    this.terrain?.geometry.dispose();
+    this.scenery.dispose();
+    this.materials.dispose();
+    this.sky.dispose();
+    this.postfx.dispose();
+    this.renderer.dispose();
+    void smoothstep;
+  }
+}
+
+/**
+ * expo-gl expose un contexte sans canvas DOM. three.js a besoin d'un objet
+ * minimal (style, dimensions, événements) : on lui fournit ce shim.
+ */
+function makeCanvasShim(gl: any) {
+  const vga: any = {
+    width: gl.drawingBufferWidth,
+    height: gl.drawingBufferHeight,
+    style: {},
+    clientWidth: gl.drawingBufferWidth,
+    clientHeight: gl.drawingBufferHeight,
+    getContext: () => gl,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    setAttribute: () => undefined,
+    getExtension: (n: string) => gl.getExtension?.(n),
+  };
+  return vga as HTMLCanvasElement;
+}

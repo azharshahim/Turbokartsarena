@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <meta name="theme-color" content="#070a16" />
+    <title>Turbo Karts Arena — Preview</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/node_modules/three/build/three.module.js",
+          "three/examples/jsm/": "/node_modules/three/examples/jsm/"
+        }
+      }
+    </script>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { width: 100%; height: 100%; overflow: hidden; background: #070a16; }
+      body {
+        font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: #eaf0ff;
+        -webkit-font-smoothing: antialiased;
+        touch-action: none;
+        user-select: none;
+      }
+      #stage { position: fixed; inset: 0; }
+      canvas { display: block; width: 100%; height: 100%; }
+
+      /* ---------- HUD ---------- */
+      #hud { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.4s; }
+      #hud.live { opacity: 1; }
+      .panel {
+        background: rgba(9, 15, 30, 0.62);
+        border: 1px solid rgba(120, 160, 255, 0.16);
+        border-radius: 14px;
+        backdrop-filter: blur(8px);
+        padding: 8px 14px;
+      }
+      .hud-top { position: absolute; top: 16px; left: 16px; right: 16px; display: flex; gap: 10px; align-items: flex-start; }
+      .label { font-size: 10px; letter-spacing: 2.4px; color: #8497c4; font-weight: 700; }
+      .value { font-size: 25px; font-weight: 900; line-height: 1.05; font-variant-numeric: tabular-nums; }
+      .value small { font-size: 13px; color: #93a6cc; font-weight: 700; }
+      .spacer { flex: 1; }
+      #speedo { position: absolute; right: 24px; bottom: 152px; text-align: right; }
+      #speed { font-size: 60px; font-weight: 900; line-height: 0.92; letter-spacing: -2px; font-variant-numeric: tabular-nums; text-shadow: 0 6px 30px rgba(0, 160, 255, 0.35); }
+      #speedUnit { font-size: 13px; letter-spacing: 4px; color: #93a6cc; font-weight: 700; }
+      #driftMeter { width: 168px; height: 10px; border-radius: 6px; background: rgba(9, 15, 30, 0.7); margin-top: 10px; overflow: hidden; margin-left: auto; border: 1px solid rgba(120,160,255,.14); }
+      #driftFill { height: 100%; width: 2%; background: #8ea2c8; border-radius: 6px; transition: width 0.06s linear, background-color 0.15s; }
+      #best { font-size: 11px; color: #8497c4; margin-top: 6px; font-variant-numeric: tabular-nums; }
+
+      #minimap { position: absolute; left: 18px; bottom: 22px; width: 132px; height: 132px; opacity: 0.92; }
+      #places { position: absolute; right: 20px; top: 96px; display: flex; flex-direction: column; gap: 5px; align-items: flex-end; }
+      .placeRow { font-size: 12px; font-weight: 800; color: #b9c8ea; display: flex; gap: 8px; align-items: center; }
+      .placeDot { width: 8px; height: 8px; border-radius: 50%; }
+      .placeRow.me { color: #fff; }
+
+      #countdown { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+      #countdown span { font-size: 150px; font-weight: 900; text-shadow: 0 12px 60px rgba(0,0,0,0.6); }
+      #toast { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); font-size: 30px; font-weight: 900; letter-spacing: 3px; opacity: 0; transition: opacity 0.25s, transform 0.25s; text-shadow: 0 6px 30px rgba(0,0,0,.6); }
+      #toast.show { opacity: 1; transform: translateX(-50%) translateY(-8px); }
+
+      #controls { position: absolute; inset: auto 0 0 0; height: 190px; display: flex; align-items: flex-end; padding: 0 22px 22px; pointer-events: none; }
+      .padBtn {
+        pointer-events: auto; width: 96px; height: 96px; border-radius: 50%;
+        background: rgba(18, 26, 51, 0.72); border: 1px solid rgba(120, 160, 255, 0.2);
+        display: flex; align-items: center; justify-content: center; color: #fff;
+        font-size: 34px; font-weight: 900; margin-right: 12px; transition: transform 0.08s, background 0.12s;
+        backdrop-filter: blur(6px);
+      }
+      .padBtn.active { background: rgba(64, 200, 255, 0.34); transform: scale(0.94); }
+      .actionBtn {
+        pointer-events: auto; width: 104px; height: 104px; border-radius: 50%;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+        font-size: 11px; font-weight: 900; letter-spacing: 1.2px; margin-left: 12px;
+        border: 1px solid rgba(255,255,255,.14); transition: transform 0.08s, filter 0.12s;
+      }
+      .actionBtn.active { transform: scale(0.93); filter: brightness(1.35); }
+      #brakeBtn { background: rgba(255, 61, 110, 0.72); }
+      #driftBtn { background: rgba(43, 107, 255, 0.78); }
+      .actionBtn svg { width: 26px; height: 26px; }
+      #driftBtn .tierRing { position: absolute; inset: -6px; border-radius: 50%; border: 3px solid transparent; }
+
+      #pauseBtn { pointer-events: auto; }
+
+      /* ---------- overlays ---------- */
+      .overlay {
+        position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        background: radial-gradient(120% 120% at 50% 0%, #16224a 0%, #070a16 62%);
+        gap: 12px; padding: 26px; text-align: center; z-index: 20;
+      }
+      .overlay.hidden { display: none; }
+      .glow { position: absolute; top: -180px; width: 620px; height: 620px; border-radius: 50%;
+        background: radial-gradient(circle, rgba(43, 59, 255, 0.34) 0%, rgba(43, 59, 255, 0) 70%); pointer-events: none; }
+      h1 { font-size: clamp(34px, 6vw, 62px); font-weight: 900; letter-spacing: 3px; }
+      h1 em { color: #ff3d6e; font-style: normal; }
+      .sub { letter-spacing: 12px; color: #7f93c8; font-weight: 700; font-size: 13px; margin-top: -10px; }
+      .row { display: flex; align-items: center; gap: 18px; }
+      .arrow { width: 46px; height: 46px; border-radius: 50%; background: rgba(18,26,51,.9); border: 1px solid rgba(120,160,255,.2);
+        display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 22px; color: #cfe0ff; }
+      .arrow:hover { background: rgba(40, 60, 120, .9); }
+      .pickTitle { font-size: 24px; font-weight: 900; min-width: 260px; }
+      .pickSub { font-size: 12.5px; color: #8ea2c8; }
+      .stats { width: min(430px, 86vw); display: grid; gap: 7px; margin-top: 4px; }
+      .statRow { display: flex; align-items: center; gap: 10px; font-size: 11px; letter-spacing: 1.4px; color: #a7b8dd; font-weight: 700; }
+      .statRow span:first-child { width: 96px; text-align: left; }
+      .track { flex: 1; height: 8px; border-radius: 4px; background: #182140; overflow: hidden; }
+      .fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, #40c8ff, #2b6bff); }
+      .play {
+        margin-top: 10px; display: flex; align-items: center; gap: 12px; background: #ffe14d; color: #0b1020;
+        border: 0; border-radius: 34px; padding: 0 40px; height: 66px; font-size: 22px; font-weight: 900; letter-spacing: 2.5px;
+        cursor: pointer; box-shadow: 0 18px 50px rgba(255, 225, 77, 0.24); transition: transform 0.12s;
+      }
+      .play:hover { transform: translateY(-2px) scale(1.02); }
+      .play:active { transform: scale(0.98); }
+      .tools { display: flex; gap: 10px; margin-top: 6px; flex-wrap: wrap; justify-content: center; }
+      .tool {
+        display: flex; align-items: center; gap: 8px; padding: 11px 16px; border-radius: 13px; cursor: pointer;
+        background: #121a33; border: 1px solid rgba(120,160,255,.12); color: #dbe4ff; font-size: 13px; font-weight: 700;
+      }
+      .tool:hover { background: #1a2444; }
+      .tool.on { border-color: #40c8ff; background: #16244a; }
+      .hint { font-size: 11.5px; color: #61729c; letter-spacing: 0.6px; margin-top: 6px; max-width: 620px; line-height: 1.5; }
+      kbd { background: #182140; border-radius: 5px; padding: 1px 6px; font-size: 11px; color: #cfe0ff; border: 1px solid rgba(120,160,255,.16); }
+
+      .resultsCard { width: min(460px, 88vw); background: #0f1730; border: 1px solid rgba(120,160,255,.14); border-radius: 20px; padding: 20px; display: grid; gap: 10px; }
+      .resultsRow { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+      .resultsRow b { font-size: 18px; }
+      .medal { font-size: 52px; }
+
+      #fpsBadge { position: fixed; left: 50%; top: 8px; transform: translateX(-50%); font-size: 10.5px; letter-spacing: 1.6px;
+        color: #6e82b0; background: rgba(7, 10, 22, 0.72); padding: 4px 10px; border-radius: 20px; z-index: 30; display: none; }
+      #fpsBadge.on { display: block; }
+      #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #070a16; z-index: 40; gap: 14px; }
+      #loading.hidden { display: none; }
+      .spinner { width: 46px; height: 46px; border-radius: 50%; border: 3px solid #1b2748; border-top-color: #40c8ff; animation: spin 0.9s linear infinite; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @media (max-width: 700px) {
+        #speed { font-size: 48px; }
+        #minimap { width: 96px; height: 96px; }
+        .padBtn { width: 78px; height: 78px; font-size: 26px; }
+        .actionBtn { width: 84px; height: 84px; font-size: 9px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage"></div>
+
+    <!-- HUD de course -->
+    <div id="hud">
+      <div class="hud-top">
+        <div class="panel">
+          <div class="label">TOUR</div>
+          <div class="value"><span id="lap">1</span><small>/<span id="laps">3</span></small></div>
+        </div>
+        <div class="panel">
+          <div class="label">TEMPS</div>
+          <div class="value" id="time" style="font-size: 20px">0:00.000</div>
+        </div>
+        <div class="panel">
+          <div class="label">PLACE</div>
+          <div class="value"><span id="place">1</span><small>/<span id="total">6</span></small></div>
+        </div>
+        <div class="spacer"></div>
+        <div class="panel" id="pauseBtn" style="cursor: pointer; display: flex; align-items: center; gap: 8px">
+          <span class="label" id="fpsInline">— FPS</span>
+        </div>
+      </div>
+
+      <div id="places"></div>
+
+      <div id="speedo">
+        <div id="speed">0</div>
+        <div id="speedUnit">KM/H</div>
+        <div id="driftMeter"><div id="driftFill"></div></div>
+        <div id="best">Meilleur tour —</div>
+      </div>
+
+      <svg id="minimap" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
+        <path id="mapPath" fill="none" stroke="rgba(140,170,255,0.35)" stroke-width="3.4" stroke-linejoin="round" />
+        <path id="mapPath2" fill="none" stroke="rgba(9,15,30,0.9)" stroke-width="1.6" stroke-linejoin="round" />
+        <circle id="mapDot" r="2.6" fill="#ffe14d" />
+        <circle id="mapDotGlow" r="6" fill="rgba(255,225,77,0.28)" />
+      </svg>
+
+      <div id="countdown"></div>
+      <div id="toast"></div>
+
+      <div id="controls">
+        <div class="padBtn" id="leftBtn">‹</div>
+        <div class="padBtn" id="rightBtn">›</div>
+        <div class="spacer" style="flex: 1"></div>
+        <div class="actionBtn" id="brakeBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M12 3l7 3v6c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"/></svg>
+          FREIN
+        </div>
+        <div class="actionBtn" id="driftBtn" style="position: relative">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M3 17c3.5 0 4-9 8-9s4.5 9 8 9"/><path d="M16 5.5l3 2.5-3 2.5"/><circle cx="6.5" cy="19.5" r="1.6" fill="#fff"/><circle cx="17.5" cy="19.5" r="1.6" fill="#fff"/></svg>
+          DÉRAPAGE
+        </div>
+      </div>
+    </div>
+
+    <!-- Menu -->
+    <div class="overlay" id="menu">
+      <div class="glow"></div>
+      <h1>TURBO<em> KARTS</em></h1>
+      <div class="sub">A R E N A</div>
+
+      <div class="row" style="margin-top: 14px">
+        <div class="arrow" id="circPrev">‹</div>
+        <div>
+          <div class="pickTitle" id="circName">Côte Solaire</div>
+          <div class="pickSub" id="circSub">Littoral · virages fluides</div>
+        </div>
+        <div class="arrow" id="circNext">›</div>
+      </div>
+
+      <div class="row">
+        <div class="arrow" id="driverPrev">‹</div>
+        <div>
+          <div class="pickTitle" id="driverName">Nova Vex</div>
+          <div class="pickSub" id="driverSub">Pilote d’usine · équilibrée</div>
+        </div>
+        <div class="arrow" id="driverNext">›</div>
+      </div>
+
+      <div class="stats" id="stats"></div>
+
+      <button class="play" id="playBtn">
+        <svg width="26" height="26" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="#0b1020" /></svg>
+        COURSE
+      </button>
+
+      <div class="tools">
+        <div class="tool" id="inputToggle">⌨️ Clavier</div>
+        <div class="tool" id="qualityToggle">⚙️ Qualité : Auto</div>
+        <div class="tool" id="lapsToggle">🏁 3 tours</div>
+        <div class="tool" id="soundToggle">🔊 Son</div>
+        <div class="tool" id="fpsToggle">📊 FPS</div>
+      </div>
+
+      <div class="hint">
+        <b>Boutons / clavier</b> : <kbd>←</kbd><kbd>→</kbd> diriger · <kbd>Espace</kbd> dérapage · <kbd>↓</kbd> frein ·
+        <kbd>P</kbd> pause. L’accélération est <b>automatique</b>. Maintenez le dérapage dans un virage : la jauge passe
+        <span style="color:#40c8ff">bleu</span> → <span style="color:#ff9a2e">orange</span> → <span style="color:#c65cff">violet</span>,
+        puis relâchez pour envoyer le turbo. Le gyroscope est utilisé automatiquement sur mobile si vous l’activez.
+      </div>
+    </div>
+
+    <!-- Résultats -->
+    <div class="overlay hidden" id="results">
+      <div class="glow"></div>
+      <div class="medal" id="medal">🏆</div>
+      <h1 id="resultTitle" style="font-size: clamp(28px, 5vw, 48px)">VICTOIRE !</h1>
+      <div class="pickSub" id="resultSub">Côte Solaire · Nova Vex</div>
+      <div class="resultsCard" id="resultCard"></div>
+      <div class="row" style="margin-top: 12px">
+        <button class="play" id="againBtn" style="padding: 0 30px; height: 58px; font-size: 18px">REJOUER</button>
+        <button class="tool" id="menuBtn" style="padding: 16px 24px">Menu</button>
+      </div>
+    </div>
+
+    <!-- Pause -->
+    <div class="overlay hidden" id="pause">
+      <h1 style="font-size: 40px">PAUSE</h1>
+      <div class="tools" style="margin-top: 12px">
+        <button class="tool" id="resumeBtn" style="padding: 16px 26px">▶ Reprendre</button>
+        <button class="tool" id="restartBtn" style="padding: 16px 26px">↻ Recommencer</button>
+        <button class="tool" id="quitBtn" style="padding: 16px 26px">Menu</button>
+      </div>
+      <div class="hint" id="pauseStats"></div>
+    </div>
+
+    <div id="loading"><div class="spinner"></div><div class="label">GÉNÉRATION DES TEXTURES 2K…</div></div>
+    <div id="fpsBadge">—</div>
+
+    <script type="module" src="./preview/main.ts"></script>
+  </body>
+</html>

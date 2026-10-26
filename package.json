@@ -1,0 +1,33 @@
+{
+  "name": "turbo-karts-arena",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "preview:build": "node tools/build-preview.mjs",
+    "preview:serve": "node tools/serve-preview.mjs",
+    "test": "esbuild tools/tests.ts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/tests.cjs --log-level=error && node node_modules/.cache/tests.cjs",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.preview.json",
+    "astc": "node tools/compress-astc.mjs"
+  },
+  "dependencies": {
+    "expo": "~51.0.28",
+    "expo-gl": "~14.0.2",
+    "expo-linear-gradient": "~13.0.2",
+    "expo-sensors": "~13.0.9",
+    "expo-status-bar": "~1.12.1",
+    "expo-three": "^8.0.0",
+    "react": "18.2.0",
+    "react-native": "0.74.5",
+    "three": "^0.166.1"
+  },
+  "devDependencies": {
+    "@types/react": "~18.2.79",
+    "@types/three": "^0.166.0",
+    "esbuild": "^0.23.1",
+    "playwright": "^1.47.2",
+    "typescript": "^5.3.3"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "Turbo Karts Arena",
+    "slug": "turbo-karts-arena",
+    "version": "0.1.0",
+    "orientation": "landscape",
+    "scheme": "turbokarts",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#070a16",
+    "splash": {
+      "backgroundColor": "#070a16",
+      "resizeMode": "contain"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "requireFullScreen": true,
+      "infoPlist": {
+        "UIInterfaceOrientationMask": ["UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"],
+        "NSMotionUsageDescription": "Le gyroscope sert à diriger le kart en inclinant l'appareil."
+      }
+    },
+    "android": {
+      "package": "com.turbokarts.arena",
+      "versionCode": 1,
+      "permissions": ["android.permission.VIBRATE"],
+      "softwareKeyboardLayoutMode": "pan",
+      "adaptiveIcon": {
+        "backgroundColor": "#070a16"
+      },
+      "hardwareAccelerated": true
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": ["expo-sensors"],
+    "experiments": {
+      "tsconfigPaths": true
+    },
+    "extra": {
+      "quality": {
+        "autoDetect": true,
+        "allowUserOverride": true
+      },
+      "targetFps": 60
+    }
+  }
+}
