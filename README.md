@@ -16,6 +16,12 @@ Paysage, 60 FPS, trois circuits, huit pilotes, 5 adversaires IA.
 
 ## 1. Démarrage rapide
 
+### Installation Android depuis Chrome (PWA)
+
+La version web inclut le manifeste, les icônes PNG et un service worker pour le
+mode hors connexion. Voir [installation et validation PWA](docs/PWA.md) pour
+les fichiers à héberger en HTTPS, les tests et les vérifications sur téléphone.
+
 ### Preview jouable (aucune installation)
 
 ```bash

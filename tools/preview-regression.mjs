@@ -4,15 +4,18 @@ import { chromium } from 'playwright';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+const target = process.env.BROWSER_TEST_URL || pathToFileURL(resolve('index.html')).href;
 const browser = await chromium.launch({
+  executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--allow-file-access-from-files'],
 });
+try {
 const page = await browser.newPage({ viewport: { width: 915, height: 412 }, isMobile: true, hasTouch: true });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-await page.route('**/*', (route) => route.request().url().startsWith('file://') ? route.continue() : route.abort());
-await page.goto(pathToFileURL(resolve('index.html')).href, { waitUntil: 'load' });
+await page.route('**/*', (route) => new URL(route.request().url()).origin === new URL(target).origin ? route.continue() : route.abort());
+await page.goto(target, { waitUntil: 'load' });
 await page.waitForFunction(() => !!window.__tka);
 assert.equal(await page.locator('#pauseBtn').innerText().then((s) => s.includes('PAUSE')), true, 'bouton pause absent');
 const controls = await page.evaluate(() => {
@@ -230,4 +233,6 @@ assert.equal(await page.evaluate(() => window.__tka.rafActive()), false, 'abort 
 assert.ok(await page.locator('#pauseBtn').isVisible());
 assert.equal(errors.length, 0, `browser errors: ${errors.join(' | ')}`);
 console.log('PASS: responsive HUD, pause/freeze/resume, P key, visibility auto-pause, multi-pointer independent release; 0 browser errors.');
-await browser.close();
+} finally {
+  await browser.close();
+}
