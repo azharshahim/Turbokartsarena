@@ -5,6 +5,7 @@
  *  • index.html → copie déployable GitHub Pages de ce même bundle autonome.
  */
 import * as esbuild from 'esbuild';
+import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 mkdirSync('preview/dist', { recursive: true });
@@ -51,3 +52,24 @@ const kb = (single.length / 1024).toFixed(0);
 console.log(`\n✅ dist/turbo-karts-arena.html (${kb} Ko, autonome, hors ligne)`);
 console.log('✅ preview/dist/index.html (build de dev)');
 console.log('✅ index.html (bundle déployable GitHub Pages)');
+
+/* ---------- 3. PWA (root / GitHub Pages, development preview, portable dist) ---------- */
+const assets = ['manifest.webmanifest', 'icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
+const workerTemplate = readFileSync('service-worker.js', 'utf8')
+  .replace(/const CACHE_VERSION = '[^']*';/, "const CACHE_VERSION = 'development';");
+const hash = createHash('sha256').update(single).update(workerTemplate);
+for (const asset of assets) hash.update(readFileSync(asset));
+const version = hash.digest('hex').slice(0, 16);
+const worker = workerTemplate.replace("const CACHE_VERSION = 'development';", `const CACHE_VERSION = '${version}';`);
+writeFileSync('service-worker.js', worker);
+for (const directory of ['preview/dist', 'dist']) {
+  mkdirSync(`${directory}/icons`, { recursive: true });
+  for (const asset of assets) writeFileSync(`${directory}/${asset}`, readFileSync(asset));
+  // The development preview uses an external bundle; it must also be available offline.
+  const scopedWorker = directory === 'preview/dist'
+    ? worker.replace("const APP_SHELL = [", "const APP_SHELL = ['./preview.js', ")
+    : worker;
+  writeFileSync(`${directory}/service-worker.js`, scopedWorker);
+}
+writeFileSync('dist/index.html', single);
+console.log(`✅ PWA assets + versioned offline shell (${version})`);

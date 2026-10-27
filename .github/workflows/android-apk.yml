@@ -30,6 +30,7 @@ jobs:
       - name: Installer Chromium pour Playwright
         run: npx playwright install --with-deps chromium
       - run: npm run test:browser
+      - run: npm run test:pwa
       - run: npx expo prebuild --platform android --no-install
       - name: "Build APK (release, signé avec la clé debug : installable directement)"
         working-directory: android

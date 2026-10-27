@@ -4,6 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#070a16" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
     <title>Turbo Karts Arena — Preview</title>
     
     <style>
@@ -4737,5 +4740,14 @@ three/build/three.module.js:
 */
 
 </script>
+    <script>
+      // A service worker requires HTTPS (or localhost); keep file:// exports playable.
+      if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('./service-worker.js', { updateViaCache: 'none' })
+            .catch((error) => console.warn('Installation hors connexion indisponible :', error));
+        });
+      }
+    </script>
   </body>
 </html>
