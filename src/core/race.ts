@@ -4,6 +4,7 @@
  * événements pour le rendu (particules, audio, HUD).
  */
 
+import { DIFFICULTIES, VEHICLES, vehicleProfile, type Difficulty } from '../game/vehicles';
 import { PHYSICS } from './config';
 import { Kart, NEUTRAL_INPUT, resolveKartCollisions, type DriveInput } from './kart';
 import { Track } from './track';
@@ -32,6 +33,8 @@ export interface RaceInputs {
 
 export interface RaceOptions {
   circuit: Circuit;
+  laps?: number;
+  difficulty?: Difficulty;
   playerProfile?: KartProfile;
   opponents?: number;
   rfSpeed?: number;
@@ -39,6 +42,8 @@ export interface RaceOptions {
 }
 
 export class Race {
+  readonly laps: number;
+  readonly aiSpeed: number;
   readonly track: Track;
   readonly circuit: Circuit;
   readonly player: Kart;
@@ -60,8 +65,11 @@ export class Race {
 
   constructor(opts: RaceOptions) {
     this.circuit = opts.circuit;
-    this.track = new Track(opts.circuit);
-    this.catchUp = opts.catchUp ?? true;
+    this.laps = Math.round(clamp(opts.laps ?? PHYSICS.race.laps, 1, 5));
+    const difficulty = opts.difficulty ? DIFFICULTIES[opts.difficulty] : undefined;
+    this.aiSpeed = difficulty?.aiSpeed ?? 1;
+    this.track = new Track({ ...opts.circuit, guardrails: true });
+    this.catchUp = opts.catchUp ?? difficulty?.catchUp ?? true;
     this.speedScale = opts.rfSpeed ?? 1;
     this.rng = makeRng(opts.circuit.seed + 7);
 
@@ -73,9 +81,12 @@ export class Race {
     this.karts.push(this.player);
 
     for (let i = 0; i < opponentCount; i++) {
-      const profile = others[i % others.length];
+      const driver = others[i % others.length];
+      const profile = playerProfile.vehicleId
+        ? vehicleProfile(driver, VEHICLES[i % VEHICLES.length])
+        : driver;
       const k = new Kart(i + 1, profile, false);
-      k.aiSkill = 0.45 + (i / Math.max(1, opponentCount - 1)) * 0.5;
+      k.aiSkill = difficulty?.skill ?? 0.45 + (i / Math.max(1, opponentCount - 1)) * 0.5;
       this.brains.set(k.state.id, makeBrain(this.rng, k.aiSkill));
       this.karts.push(k);
     }
@@ -111,13 +122,17 @@ export class Race {
   }
 
   get lapDisplay() {
-    return `${Math.min(PHYSICS.race.laps, this.player.state.lap + 1)}/${PHYSICS.race.laps}`;
+    return `${Math.min(this.laps, this.player.state.lap + 1)}/${this.laps}`;
   }
 
   /** 0..1 : progression du joueur dans le tour courant (pour le HUD). */
   get lapProgress() {
     const st = this.player.state;
-    return clamp(st.totalDistance / this.track.length - Math.floor(st.totalDistance / this.track.length), 0, 1);
+    return clamp(
+      st.totalDistance / this.track.length - Math.floor(st.totalDistance / this.track.length),
+      0,
+      1,
+    );
   }
 
   /** Rangs de tous les karts (1 = leader). */
@@ -183,9 +198,9 @@ export class Race {
       if (this.catchUp && !k.isPlayer) {
         const gap = this.player.state.totalDistance - k.state.totalDistance;
         const target = 1 + clamp(gap / PHYSICS.ai.catchupRange, -1, 1) * PHYSICS.ai.catchupBoost;
-        k.state.speedMult = this.speedScale * Math.min(1.1, Math.max(0.88, target));
+        k.state.speedMult = this.speedScale * this.aiSpeed * Math.min(1.1, Math.max(0.88, target));
       } else if (!k.isPlayer) {
-        k.state.speedMult = this.speedScale;
+        k.state.speedMult = this.speedScale * this.aiSpeed;
       } else {
         k.state.speedMult = this.speedScale;
       }
@@ -230,7 +245,7 @@ export class Race {
           lap: k.state.lap,
           lapTime: last ? k.state.lastLapTime : k.state.lapTimes[k.state.lapTimes.length - 1],
         });
-        if (k.state.lap >= PHYSICS.race.laps) {
+        if (k.state.lap >= this.laps) {
           k.state.status = 'finished';
           k.state.finishTime = this.raceTime;
           this.finishOrder.push(k.state.id);

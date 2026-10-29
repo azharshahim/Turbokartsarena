@@ -1,6 +1,6 @@
 {
   "name": "turbo-karts-arena",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "private": true,
   "main": "index.js",
   "scripts": {
@@ -13,7 +13,9 @@
     "astc": "node tools/compress-astc.mjs",
     "test:browser": "node tools/preview-regression.mjs",
     "test:pwa": "node tools/pwa-regression.mjs",
-    "icons:build": "node tools/generate-icons.mjs"
+    "icons:build": "node tools/generate-icons.mjs",
+    "test:v2": "esbuild tools/tests-v2.ts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/tests-v2.cjs --log-level=error && node node_modules/.cache/tests-v2.cjs",
+    "test:browser:v2": "node tools/browser-v2.mjs"
   },
   "dependencies": {
     "expo": "~51.0.28",

@@ -1,0 +1,69 @@
+{
+  "renderer": "Chromium / ANGLE SwiftShader software rendering, cloud CPU; not Android performance",
+  "results": [
+    {
+      "vehicle": "Apex R4",
+      "circuit": "coast",
+      "quality": "low",
+      "drawCalls": 97,
+      "triangles": 140046,
+      "softwareMsPerFrame": 218.8
+    },
+    {
+      "vehicle": "Vector Formula",
+      "circuit": "desert",
+      "quality": "low",
+      "drawCalls": 86,
+      "triangles": 143282,
+      "softwareMsPerFrame": 221
+    },
+    {
+      "vehicle": "Nomad RX",
+      "circuit": "neon",
+      "quality": "low",
+      "drawCalls": 124,
+      "triangles": 143250,
+      "softwareMsPerFrame": 252.3
+    },
+    {
+      "vehicle": "Pulse Sprint",
+      "circuit": "alps",
+      "quality": "low",
+      "drawCalls": 91,
+      "triangles": 155308,
+      "softwareMsPerFrame": 225.3
+    },
+    {
+      "vehicle": "Aerion S",
+      "circuit": "tokyo",
+      "quality": "low",
+      "drawCalls": 108,
+      "triangles": 156064,
+      "softwareMsPerFrame": 314.8
+    },
+    {
+      "vehicle": "Spectre RR",
+      "circuit": "sahara",
+      "quality": "low",
+      "drawCalls": 86,
+      "triangles": 146680,
+      "softwareMsPerFrame": 215.5
+    },
+    {
+      "vehicle": "Terra X",
+      "circuit": "jungle",
+      "quality": "low",
+      "drawCalls": 80,
+      "triangles": 143663,
+      "softwareMsPerFrame": 250.4
+    },
+    {
+      "vehicle": "Horizon GT",
+      "circuit": "mediterranean",
+      "quality": "low",
+      "drawCalls": 91,
+      "triangles": 152650,
+      "softwareMsPerFrame": 261.9
+    }
+  ]
+}

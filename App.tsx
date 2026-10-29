@@ -3,7 +3,7 @@
  *
  * Le rendu 3D tourne dans une `GLView` (expo-gl) pilotée par le MOTEUR PARTAGÉ
  * (`src/render/world.ts`), exactement le même code que la preview web.
- * Le HUD est en React Native pur (aucun WebView) : 60 FPS garantis.
+ * Le HUD est en React Native pur (aucun WebView) : cadence dépendante de l’appareil et du palier choisi.
  *
  * Entrées :
  *  - Boutons tactiles (accélération automatique, boutons gauche/droite + dérapage)
@@ -25,12 +25,15 @@ import {
   Text,
   TouchableOpacity,
   View,
+  ScrollView,
   useWindowDimensions,
 } from 'react-native';
 
 import { PhysicsEngine } from './src/render/world';
 import { CIRCUITS, type Circuit } from './src/game/circuits';
 import { ROSTER, type KartProfile } from './src/game/roster';
+import { VEHICLES, vehicleProfile, DIFFICULTIES, type Difficulty } from './src/game/vehicles';
+import { Showroom } from './src/render/showroom';
 import { autoQuality, QUALITY, type QualityLevel } from './src/core/config';
 import { formatLap, formatTime } from './src/core/race';
 import {
@@ -48,9 +51,18 @@ interface Settings {
   gyro: boolean;
   sound: boolean;
   laps: number;
+  vehicle: number;
+  difficulty: Difficulty;
 }
 
-const DEFAULT_SETTINGS: Settings = { quality: 'auto', gyro: false, sound: true, laps: 3 };
+const DEFAULT_SETTINGS: Settings = {
+  quality: 'auto',
+  gyro: false,
+  sound: false,
+  laps: 3,
+  vehicle: 0,
+  difficulty: 'arcade',
+};
 
 type HeldButtons = { left: boolean; right: boolean; drift: boolean; brake: boolean };
 const EMPTY_HELD: HeldButtons = { left: false, right: false, drift: false, brake: false };
@@ -58,6 +70,7 @@ const EMPTY_HELD: HeldButtons = { left: false, right: false, drift: false, brake
 function makeInitialHud(laps: number) {
   return {
     speed: 0,
+    warning: '',
     tier: 0,
     charge: 0,
     boosting: false,
@@ -137,9 +150,7 @@ export default function App() {
   const clearHeldInputs = useCallback(() => {
     touchControllerRef.current.clear();
     inputRef.current = { ...EMPTY_HELD };
-    setPressedButtons((prev) =>
-      prev.left || prev.right || prev.drift || prev.brake ? EMPTY_HELD : prev,
-    );
+    setPressedButtons((prev) => (prev.left || prev.right || prev.drift || prev.brake ? EMPTY_HELD : prev));
     gyroRef.current.rest = gyroRef.current.angle;
     engineRef.current?.setInput({ steer: 0, drift: false, brake: false, throttle: 1 });
   }, []);
@@ -185,6 +196,7 @@ export default function App() {
       setHud((current) => ({
         ...current,
         speed: Math.round(p.kmh),
+        warning: '',
         tier: p.state.driftTier,
         charge: p.driftChargeRatio,
         boosting: p.isBoosting,
@@ -276,6 +288,9 @@ export default function App() {
       const p = race.player;
       setHud({
         speed: Math.round(p.kmh),
+        warning: e.stats.hazard
+          ? `${e.stats.hazard.hazard.label} · ${Math.round(e.stats.hazard.distance)} m`
+          : '',
         tier: p.state.driftTier,
         charge: p.driftChargeRatio,
         boosting: p.isBoosting,
@@ -339,7 +354,7 @@ export default function App() {
 
   /* ---------------- démarrage / GLView ---------------- */
   const circuit: Circuit = CIRCUITS[circuitIndex];
-  const profile: KartProfile = ROSTER[profileIndex];
+  const profile: KartProfile = vehicleProfile(ROSTER[profileIndex], VEHICLES[settings.vehicle]);
 
   const onContextCreate = useCallback(
     async (gl: any) => {
@@ -390,6 +405,7 @@ export default function App() {
         circuit,
         profile,
         laps: settings.laps,
+        difficulty: settings.difficulty,
         onFrame: () => undefined,
       });
       engine.onFinish = () => {
@@ -542,15 +558,25 @@ export default function App() {
             onZoneRect={setZoneRect}
             onPause={pauseRace}
             gyro={settings.gyro}
+            bike={VEHICLES[settings.vehicle].kind !== 'kart'}
             paused={paused}
           />
-          {paused && (
-            <PauseMenu
-              onResume={resumeRace}
-              onRestart={restartCurrentRace}
-              onMenu={quitRace}
-            />
+          {!!hud.warning && (
+            <Text
+              style={{
+                position: 'absolute',
+                top: 90,
+                alignSelf: 'center',
+                color: '#ffe8ad',
+                backgroundColor: '#17202edd',
+                padding: 8,
+                borderRadius: 8,
+              }}
+            >
+              ⚠ {hud.warning}
+            </Text>
           )}
+          {paused && <PauseMenu onResume={resumeRace} onRestart={restartCurrentRace} onMenu={quitRace} />}
         </View>
       )}
 
@@ -571,6 +597,37 @@ export default function App() {
 /* Écran de menu                                                      */
 /* ------------------------------------------------------------------ */
 
+/** GL garage uses the same mesh factory as the race, and releases its frame loop. */
+const NativeGarage: React.FC<{ profile: KartProfile }> = ({ profile }) => {
+  const showroom = useRef<Showroom | null>(null);
+  const raf = useRef<number>(0);
+  useEffect(() => {
+    showroom.current?.select(profile);
+  }, [profile.id, profile.vehicleId]);
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(raf.current);
+      showroom.current?.dispose();
+      showroom.current = null;
+    },
+    [],
+  );
+  return (
+    <GLView
+      style={{ width: 320, height: 190 }}
+      onContextCreate={(gl: any) => {
+        showroom.current = new Showroom(null, profile, gl);
+        const frame = (time: number) => {
+          if (!showroom.current) return;
+          showroom.current.frame(time, gl.drawingBufferWidth, gl.drawingBufferHeight);
+          raf.current = requestAnimationFrame(frame);
+        };
+        raf.current = requestAnimationFrame(frame);
+      }}
+    />
+  );
+};
+
 const MenuScreen: React.FC<{
   circuitIndex: number;
   setCircuitIndex: (n: number) => void;
@@ -581,7 +638,8 @@ const MenuScreen: React.FC<{
   onStart: () => void;
 }> = ({ circuitIndex, setCircuitIndex, profileIndex, setProfileIndex, settings, setSettings, onStart }) => {
   const circuit = CIRCUITS[circuitIndex];
-  const profile = ROSTER[profileIndex];
+  const driver = ROSTER[profileIndex];
+  const profile = vehicleProfile(driver, VEHICLES[settings.vehicle]);
   const { width } = useWindowDimensions();
   const [showSettings, setShowSettings] = useState(false);
 
@@ -595,7 +653,14 @@ const MenuScreen: React.FC<{
   );
 
   return (
-    <View style={styles.menu}>
+    <ScrollView
+      contentContainerStyle={[
+        styles.menu,
+        { flex: undefined, flexGrow: 1, paddingVertical: 20, minHeight: '100%' },
+      ]}
+      style={{ flex: 1 }}
+    >
+      <NativeGarage profile={profile} />
       <View style={styles.menuGlow} />
       <Text style={styles.logo}>
         TURBO<Text style={styles.logoAccent}> KARTS</Text>
@@ -603,12 +668,16 @@ const MenuScreen: React.FC<{
       <Text style={styles.logoSub}>A R E N A</Text>
 
       <View style={styles.pickerRow}>
-        <TouchableOpacity onPress={() => setCircuitIndex((circuitIndex + CIRCUITS.length - 1) % CIRCUITS.length)}>
+        <TouchableOpacity
+          onPress={() => setCircuitIndex((circuitIndex + CIRCUITS.length - 1) % CIRCUITS.length)}
+        >
           <Icon name="chevronLeft" size={34} color="#9fb4ff" />
         </TouchableOpacity>
         <View style={{ alignItems: 'center' }}>
           <Text style={styles.pickerTitle}>{circuit.name}</Text>
-          <Text style={styles.pickerSub}>{circuit.subtitle}</Text>
+          <Text style={styles.pickerSub}>
+            {circuit.subtitle} · {circuit.difficulty ?? 'Intermédiaire'}
+          </Text>
         </View>
         <TouchableOpacity onPress={() => setCircuitIndex((circuitIndex + 1) % CIRCUITS.length)}>
           <Icon name="chevronRight" size={34} color="#9fb4ff" />
@@ -620,7 +689,11 @@ const MenuScreen: React.FC<{
           <Icon name="chevronLeft" size={34} color="#9fb4ff" />
         </TouchableOpacity>
         <View style={{ alignItems: 'center' }}>
-          <Text style={styles.pickerTitle}>{profile.name}</Text>
+          <Text
+            style={[styles.pickerTitle, { color: '#' + driver.visorColor.toString(16).padStart(6, '0') }]}
+          >
+            {profile.name}
+          </Text>
           <Text style={styles.pickerSub}>{profile.tagline}</Text>
         </View>
         <TouchableOpacity onPress={() => setProfileIndex((profileIndex + 1) % ROSTER.length)}>
@@ -628,6 +701,38 @@ const MenuScreen: React.FC<{
         </TouchableOpacity>
       </View>
 
+      <View style={styles.pickerRow}>
+        <TouchableOpacity
+          accessibilityLabel="Véhicule précédent"
+          onPress={() =>
+            setSettings({ ...settings, vehicle: (settings.vehicle + VEHICLES.length - 1) % VEHICLES.length })
+          }
+        >
+          <Icon name="chevronLeft" size={34} color="#9fb4ff" />
+        </TouchableOpacity>
+        <View style={{ alignItems: 'center', flex: 1 }}>
+          <Text style={styles.pickerTitle}>{VEHICLES[settings.vehicle].name}</Text>
+          <Text style={styles.pickerSub}>{VEHICLES[settings.vehicle].description}</Text>
+        </View>
+        <TouchableOpacity
+          accessibilityLabel="Véhicule suivant"
+          onPress={() => setSettings({ ...settings, vehicle: (settings.vehicle + 1) % VEHICLES.length })}
+        >
+          <Icon name="chevronRight" size={34} color="#9fb4ff" />
+        </TouchableOpacity>
+      </View>
+      <TouchableOpacity
+        style={styles.toolButton}
+        onPress={() => {
+          const levels = Object.keys(DIFFICULTIES) as Difficulty[];
+          setSettings({
+            ...settings,
+            difficulty: levels[(levels.indexOf(settings.difficulty) + 1) % levels.length],
+          });
+        }}
+      >
+        <Text style={styles.toolText}>Difficulté : {DIFFICULTIES[settings.difficulty].name}</Text>
+      </TouchableOpacity>
       <View style={{ width: Math.min(420, width * 0.8) }}>
         {statBar('Vitesse', profile.speed)}
         {statBar('Accélération', profile.accel)}
@@ -641,7 +746,10 @@ const MenuScreen: React.FC<{
       </TouchableOpacity>
 
       <View style={styles.menuTools}>
-        <TouchableOpacity style={styles.toolButton} onPress={() => setSettings({ ...settings, gyro: !settings.gyro })}>
+        <TouchableOpacity
+          style={styles.toolButton}
+          onPress={() => setSettings({ ...settings, gyro: !settings.gyro })}
+        >
           <Icon name={settings.gyro ? 'gyro' : 'touch'} size={20} color="#dbe4ff" />
           <Text style={styles.toolText}>{settings.gyro ? 'Gyroscope' : 'Boutons'}</Text>
         </TouchableOpacity>
@@ -661,7 +769,13 @@ const MenuScreen: React.FC<{
               onPress={() => setSettings({ ...settings, quality: q })}
             >
               <Text style={styles.settingsLabel}>
-                {q === 'auto' ? 'Automatique (détection appareil)' : q === 'low' ? 'Basse' : q === 'high' ? 'Haute' : 'Ultra'}
+                {q === 'auto'
+                  ? 'Automatique (détection appareil)'
+                  : q === 'low'
+                    ? 'Basse'
+                    : q === 'high'
+                      ? 'Haute'
+                      : 'Ultra'}
               </Text>
               {settings.quality === q && <Icon name="check" size={18} color="#4ade80" />}
             </TouchableOpacity>
@@ -678,12 +792,15 @@ const MenuScreen: React.FC<{
               </TouchableOpacity>
             ))}
           </View>
-          <TouchableOpacity style={[styles.playButton, { marginTop: 18, height: 48 }]} onPress={() => setShowSettings(false)}>
+          <TouchableOpacity
+            style={[styles.playButton, { marginTop: 18, height: 48 }]}
+            onPress={() => setShowSettings(false)}
+          >
             <Text style={[styles.playText, { fontSize: 16 }]}>FERMER</Text>
           </TouchableOpacity>
         </View>
       )}
-    </View>
+    </ScrollView>
   );
 };
 
@@ -769,8 +886,9 @@ const TouchHud: React.FC<{
   onZoneRect: (id: TouchZoneId, rect: TouchZoneRect | null) => void;
   onPause: () => void;
   gyro: boolean;
+  bike: boolean;
   paused: boolean;
-}> = ({ hud, pressed, onZoneRect, onPause, gyro, paused }) => {
+}> = ({ hud, pressed, onZoneRect, onPause, gyro, bike, paused }) => {
   const tierColors = ['#8ea2c8', '#40c8ff', '#ff9a2e', '#c65cff'];
   const [topOffset, setTopOffset] = useState({ x: 16, y: 16 });
   const [controlsOffset, setControlsOffset] = useState({ x: 0, y: 0 });
@@ -930,11 +1048,11 @@ const TouchHud: React.FC<{
             pressed={pressed.drift}
             parentOffset={controlsOffset}
             onZoneRect={onZoneRect}
-            accessibilityLabel="Dérapage"
+            accessibilityLabel={bike ? 'Glisse et turbo moto' : 'Dérapage'}
             style={[styles.actionButton, styles.driftButton]}
           >
             <Icon name="drift" size={24} color="#fff" />
-            <Text style={styles.actionText}>DÉRAPAGE</Text>
+            <Text style={styles.actionText}>{bike ? 'GLISSE / TURBO' : 'DÉRAPAGE'}</Text>
           </HoldButton>
         </View>
       )}
@@ -944,23 +1062,29 @@ const TouchHud: React.FC<{
           <CountdownPulse value={hud.countdown} />
         </View>
       )}
-      {hud.boosting && (
-        <View style={styles.boostVignette} pointerEvents="none" />
-      )}
+      {hud.boosting && <View style={styles.boostVignette} pointerEvents="none" />}
     </View>
   );
 };
 
-const PauseMenu: React.FC<{ onResume: () => void; onRestart: () => void; onMenu: () => void }> = ({ onResume, onRestart, onMenu }) => (
+const PauseMenu: React.FC<{ onResume: () => void; onRestart: () => void; onMenu: () => void }> = ({
+  onResume,
+  onRestart,
+  onMenu,
+}) => (
   <View style={styles.pauseOverlay} accessibilityViewIsModal>
     <Text style={styles.pauseTitle}>PAUSE</Text>
     <TouchableOpacity accessibilityRole="button" style={styles.pauseAction} onPress={onResume}>
-      <Text style={styles.pauseActionText}>▶  REPRENDRE</Text>
+      <Text style={styles.pauseActionText}>▶ REPRENDRE</Text>
     </TouchableOpacity>
     <TouchableOpacity accessibilityRole="button" style={styles.pauseAction} onPress={onRestart}>
-      <Text style={styles.pauseActionText}>↻  RECOMMENCER LA COURSE</Text>
+      <Text style={styles.pauseActionText}>↻ RECOMMENCER LA COURSE</Text>
     </TouchableOpacity>
-    <TouchableOpacity accessibilityRole="button" style={[styles.pauseAction, styles.pauseMenuAction]} onPress={onMenu}>
+    <TouchableOpacity
+      accessibilityRole="button"
+      style={[styles.pauseAction, styles.pauseMenuAction]}
+      onPress={onMenu}
+    >
       <Text style={styles.pauseActionText}>MENU PRINCIPAL</Text>
     </TouchableOpacity>
   </View>
@@ -970,7 +1094,12 @@ const CountdownPulse: React.FC<{ value: number }> = ({ value }) => {
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     anim.setValue(0);
-    Animated.timing(anim, { toValue: 1, duration: 700, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
+    Animated.timing(anim, {
+      toValue: 1,
+      duration: 700,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
   }, [value, anim]);
   const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [1.6, 0.85] });
   const opacity = anim.interpolate({ inputRange: [0, 0.25, 1], outputRange: [0, 1, 0.55] });
@@ -1045,7 +1174,13 @@ const styles = StyleSheet.create({
   logo: { fontSize: 46, fontWeight: '900', color: '#fff', letterSpacing: 2 },
   logoAccent: { color: '#ff3d6e' },
   logoSub: { fontSize: 16, letterSpacing: 12, color: '#7f93c8', marginTop: -8, marginBottom: 12 },
-  pickerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', maxWidth: 460 },
+  pickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    maxWidth: 460,
+  },
   pickerTitle: { fontSize: 22, fontWeight: '800', color: '#fff' },
   pickerSub: { fontSize: 13, color: '#8ea2c8', marginTop: 2 },
   statRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
@@ -1104,11 +1239,29 @@ const styles = StyleSheet.create({
   hudCard: { backgroundColor: '#0a1122cc', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12 },
   hudLabel: { color: '#7f93c8', fontSize: 10, letterSpacing: 2 },
   hudValue: { color: '#fff', fontWeight: '900', fontSize: 24 },
-  iconButton: { marginLeft: 'auto', minWidth: 58, minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#0a1122e8', paddingHorizontal: 12, borderRadius: 12 },
+  iconButton: {
+    marginLeft: 'auto',
+    minWidth: 58,
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#0a1122e8',
+    paddingHorizontal: 12,
+    borderRadius: 12,
+  },
   speedo: { position: 'absolute', right: 24, bottom: 150, alignItems: 'flex-end' },
   speedValue: { color: '#fff', fontWeight: '900', fontSize: 62, lineHeight: 64 },
   speedUnit: { color: '#8ea2c8', fontSize: 14, letterSpacing: 3, marginTop: -6 },
-  driftMeter: { width: 150, height: 10, borderRadius: 5, backgroundColor: '#0a1122cc', marginTop: 8, overflow: 'hidden' },
+  driftMeter: {
+    width: 150,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#0a1122cc',
+    marginTop: 8,
+    overflow: 'hidden',
+  },
   bestLap: { color: '#8ea2c8', fontSize: 12, marginTop: 6 },
   controls: {
     position: 'absolute',
@@ -1142,9 +1295,28 @@ const styles = StyleSheet.create({
   },
   driftButton: { backgroundColor: '#2b6bffcc' },
   actionText: { color: '#fff', fontWeight: '800', fontSize: 11, letterSpacing: 1 },
-  pauseOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 30, elevation: 30, backgroundColor: '#070a16ee', alignItems: 'center', justifyContent: 'center', padding: 20, gap: 12 },
+  pauseOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 30,
+    elevation: 30,
+    backgroundColor: '#070a16ee',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+    gap: 12,
+  },
   pauseTitle: { color: '#fff', fontWeight: '900', fontSize: 34, letterSpacing: 4, marginBottom: 6 },
-  pauseAction: { minHeight: 54, minWidth: 250, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 22, borderRadius: 14, backgroundColor: '#16244a', borderWidth: 1, borderColor: '#344a7a' },
+  pauseAction: {
+    minHeight: 54,
+    minWidth: 250,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 22,
+    borderRadius: 14,
+    backgroundColor: '#16244a',
+    borderWidth: 1,
+    borderColor: '#344a7a',
+  },
   pauseMenuAction: { backgroundColor: '#121a33' },
   pauseActionText: { color: '#eaf0ff', fontSize: 15, fontWeight: '900', letterSpacing: 1 },
   countdownOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
@@ -1156,7 +1328,14 @@ const styles = StyleSheet.create({
     borderRadius: 40,
   },
   resultsTitle: { color: '#ffe14d', fontSize: 40, fontWeight: '900', letterSpacing: 2 },
-  resultsCard: { backgroundColor: '#121a33', borderRadius: 18, padding: 20, width: '100%', maxWidth: 420, gap: 10 },
+  resultsCard: {
+    backgroundColor: '#121a33',
+    borderRadius: 18,
+    padding: 20,
+    width: '100%',
+    maxWidth: 420,
+    gap: 10,
+  },
   resultsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   resultsValue: { color: '#fff', fontWeight: '800', fontSize: 18 },
 });

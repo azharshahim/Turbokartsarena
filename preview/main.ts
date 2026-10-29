@@ -8,6 +8,8 @@
 
 import { PhysicsEngine } from '../src/render/world';
 import { CIRCUITS } from '../src/game/circuits';
+import { Showroom } from '../src/render/showroom';
+import { VEHICLES, vehicleProfile, DIFFICULTIES, type Difficulty } from '../src/game/vehicles';
 import { ROSTER } from '../src/game/roster';
 import { autoQuality, QUALITY, type QualityLevel } from '../src/core/config';
 import { formatLap, formatTime } from '../src/core/race';
@@ -17,10 +19,11 @@ const $ = (id: string) => document.getElementById(id)!;
 const state = {
   circuitIndex: 0,
   driverIndex: 0,
+  vehicleIndex: 0,
+  difficulty: 'arcade' as Difficulty,
   quality: 'auto' as QualityLevel | 'auto',
   input: 'buttons' as 'buttons' | 'gyro',
   laps: 3,
-  sound: true,
   showFps: false,
   paused: false,
   screen: 'menu' as 'menu' | 'race' | 'results',
@@ -28,6 +31,35 @@ const state = {
 };
 
 let engine: PhysicsEngine | null = null;
+let showroom: Showroom | null = null;
+let garageRaf = 0;
+function stopGarage() {
+  cancelAnimationFrame(garageRaf);
+  garageRaf = 0;
+  showroom?.dispose();
+  showroom = null;
+}
+function garageFrame(time: number) {
+  if (!showroom || state.screen !== 'menu' || document.hidden) {
+    garageRaf = 0;
+    return;
+  }
+  const canvas = $('garageCanvas') as HTMLCanvasElement;
+  showroom.frame(time, canvas.clientWidth, canvas.clientHeight);
+  garageRaf = requestAnimationFrame(garageFrame);
+}
+function refreshGarage() {
+  if (state.screen !== 'menu') return;
+  const profile = vehicleProfile(ROSTER[state.driverIndex], VEHICLES[state.vehicleIndex]);
+  if (showroom) showroom.select(profile);
+  else {
+    const canvas = $('garageCanvas');
+    canvas.replaceWith(canvas.cloneNode(false));
+    showroom = new Showroom($('garageCanvas') as HTMLCanvasElement, profile);
+  }
+  if (!garageRaf && !document.hidden) garageRaf = requestAnimationFrame(garageFrame);
+}
+
 let rafId = 0;
 const keys = new Set<string>();
 const touch = { steer: 0, drift: false, brake: false }; // synthetic input used by the capture harness
@@ -63,6 +95,7 @@ function detectQuality(): QualityLevel {
     const gl = c.getContext('webgl2') as WebGL2RenderingContext | null;
     const ext = gl?.getExtension('WEBGL_debug_renderer_info');
     gpu = ext && gl ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+    gl?.getExtension('WEBGL_lose_context')?.loseContext();
   } catch {
     /* noop */
   }
@@ -100,7 +133,8 @@ function startEngine() {
     pixelRatio: pr,
     quality: QUALITY[level],
     circuit: CIRCUITS[state.circuitIndex],
-    profile: ROSTER[state.driverIndex],
+    profile: vehicleProfile(ROSTER[state.driverIndex], VEHICLES[state.vehicleIndex]),
+    difficulty: state.difficulty,
     laps: state.laps,
     onFinish: () => {
       window.clearTimeout(finishTimeout);
@@ -122,7 +156,8 @@ function startEngine() {
     state.paused = true;
     $('pause').classList.remove('hidden');
     const s = engine.stats;
-    $('pauseStats').textContent = `${s.fps} FPS · ${s.particles} particules · rendu ×${s.pixelRatio.toFixed(2)} · qualité ${engine.quality.level}`;
+    $('pauseStats').textContent =
+      `${s.fps} FPS · ${s.particles} particules · rendu ×${s.pixelRatio.toFixed(2)} · qualité ${engine.quality.level}`;
   } else {
     startLoop();
   }
@@ -177,6 +212,9 @@ function updateHud() {
 
   const fill = $('driftFill');
   const colors = ['#8ea2c8', '#40c8ff', '#ff9a2e', '#c65cff'];
+  $('hazardWarning').textContent = s.hazard
+    ? `⚠ ${s.hazard.hazard.label} · ${Math.round(s.hazard.distance)} m`
+    : '';
   const tier = st.driftTier;
   const charge = engine.player.driftChargeRatio;
   fill.style.width = `${Math.max(tier > 0 ? 22 : 2, charge * 100)}%`;
@@ -186,7 +224,9 @@ function updateHud() {
   hudAccum += 1;
   if (hudAccum % 6 === 0) {
     $('fpsInline').textContent = `${s.fps} FPS · ${s.particles} part. · ×${s.pixelRatio.toFixed(2)}`;
-    if (state.showFps) $('fpsBadge').textContent = `${s.fps} FPS · ${s.particles} particules · rendu ×${s.pixelRatio.toFixed(2)} · ${engine?.quality.level}`;
+    if (state.showFps)
+      $('fpsBadge').textContent =
+        `${s.fps} FPS · ${s.particles} particules · rendu ×${s.pixelRatio.toFixed(2)} · ${engine?.quality.level}`;
     updatePlaces();
     updateMinimap();
   }
@@ -217,7 +257,10 @@ function updatePlaces() {
 function buildMinimap() {
   if (!engine) return;
   const pts = engine.race.track.minimapPath(110);
-  const d = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${(x * 100).toFixed(2)},${(y * 100).toFixed(2)}`).join(' ') + ' Z';
+  const d =
+    pts
+      .map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${(x * 100).toFixed(2)},${(y * 100).toFixed(2)}`)
+      .join(' ') + ' Z';
   $('mapPath').setAttribute('d', d);
   $('mapPath2').setAttribute('d', d);
 }
@@ -231,7 +274,10 @@ function updateMinimap() {
     pts = tr.minimapPath(110);
     (engine as any).__mapPoints = pts;
   }
-  const idx = Math.max(0, Math.min(pts.length - 1, Math.round(((st.s % tr.length) / tr.length) * pts.length)));
+  const idx = Math.max(
+    0,
+    Math.min(pts.length - 1, Math.round(((st.s % tr.length) / tr.length) * pts.length)),
+  );
   const [mx, my] = pts[idx];
   $('mapDot').setAttribute('cx', (mx * 100).toFixed(2));
   $('mapDot').setAttribute('cy', (my * 100).toFixed(2));
@@ -259,9 +305,18 @@ function toast(text: string, color = '#fff', ms = 900) {
 
 function renderMenu() {
   const c = CIRCUITS[state.circuitIndex];
-  const d = ROSTER[state.driverIndex];
+  const driver = ROSTER[state.driverIndex];
+  const vehicle = VEHICLES[state.vehicleIndex];
+  const d = vehicleProfile(driver, vehicle);
+  $('vehicleName').textContent = vehicle.name;
+  $('vehicleSub').textContent = vehicle.description;
+  $('garageLabel').textContent = `${driver.name} · ${vehicle.name}`;
+  $('difficultyToggle').textContent = `Difficulté : ${DIFFICULTIES[state.difficulty].name}`;
+  $('driftLabel').textContent = vehicle.kind === 'kart' ? 'DÉRAPAGE' : 'GLISSE / TURBO';
+  $('driverName').style.color = '#' + driver.visorColor.toString(16).padStart(6, '0');
+  refreshGarage();
   $('circName').textContent = c.name;
-  $('circSub').textContent = c.subtitle;
+  $('circSub').textContent = `${c.subtitle} · ${c.difficulty ?? 'Intermédiaire'}`;
   $('driverName').textContent = d.name;
   $('driverSub').textContent = d.tagline;
   const bars: Array<[string, number]> = [
@@ -276,10 +331,10 @@ function renderMenu() {
         `<div class="statRow"><span>${label}</span><div class="track"><div class="fill" style="width:${Math.min(100, (v / 1.15) * 100).toFixed(0)}%"></div></div></div>`,
     )
     .join('');
-  $('qualityToggle').textContent = `⚙️ Qualité : ${state.quality === 'auto' ? 'Auto' : state.quality === 'low' ? 'Basse' : state.quality === 'high' ? 'Haute' : 'Ultra'}`;
+  $('qualityToggle').textContent =
+    `⚙️ Qualité : ${state.quality === 'auto' ? 'Auto' : state.quality === 'low' ? 'Basse' : state.quality === 'high' ? 'Haute' : 'Ultra'}`;
   $('lapsToggle').textContent = `🏁 ${state.laps} tour${state.laps > 1 ? 's' : ''}`;
   $('inputToggle').textContent = state.input === 'gyro' ? '📱 Gyroscope' : '⌨️ Boutons / clavier';
-  $('soundToggle').textContent = state.sound ? '🔊 Son' : '🔇 Muet';
   $('fpsToggle').textContent = state.showFps ? '📊 FPS activé' : '📊 FPS';
   $('fpsBadge').classList.toggle('on', state.showFps);
   document.body.classList.toggle('gyro-on', state.input === 'gyro');
@@ -310,6 +365,7 @@ function showMenu() {
 function startRace() {
   if (state.starting || state.screen === 'race') return;
   state.starting = true;
+  stopGarage();
   window.clearTimeout(startTimeout);
   startTimeout = 0;
   window.clearTimeout(finishTimeout);
@@ -400,6 +456,19 @@ bind('driverNext', 'click', () => {
   state.driverIndex = (state.driverIndex + 1) % ROSTER.length;
   renderMenu();
 });
+bind('vehiclePrev', 'click', () => {
+  state.vehicleIndex = (state.vehicleIndex + VEHICLES.length - 1) % VEHICLES.length;
+  renderMenu();
+});
+bind('vehicleNext', 'click', () => {
+  state.vehicleIndex = (state.vehicleIndex + 1) % VEHICLES.length;
+  renderMenu();
+});
+bind('difficultyToggle', 'click', () => {
+  const levels = Object.keys(DIFFICULTIES) as Difficulty[];
+  state.difficulty = levels[(levels.indexOf(state.difficulty) + 1) % levels.length];
+  renderMenu();
+});
 bind('qualityToggle', 'click', () => {
   const order: Array<QualityLevel | 'auto'> = ['auto', 'low', 'high', 'ultra'];
   state.quality = order[(order.indexOf(state.quality) + 1) % order.length];
@@ -417,10 +486,6 @@ bind('inputToggle', 'click', async () => {
     state.input = 'buttons';
     gyro.active = false;
   }
-  renderMenu();
-});
-bind('soundToggle', 'click', () => {
-  state.sound = !state.sound;
   renderMenu();
 });
 bind('fpsToggle', 'click', () => {
@@ -460,7 +525,9 @@ function releasePointerTarget(pointerId: number) {
   if (![...pointerTargets.values()].includes(target)) target.classList.remove('active');
   try {
     if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId);
-  } catch { /* le navigateur a déjà annulé la capture */ }
+  } catch {
+    /* le navigateur a déjà annulé la capture */
+  }
   return true;
 }
 
@@ -472,7 +539,9 @@ function clearTouchPointers() {
     element.classList.remove('active');
     try {
       if (element.hasPointerCapture(pointerId)) element.releasePointerCapture(pointerId);
-    } catch { /* le navigateur a déjà annulé la capture */ }
+    } catch {
+      /* le navigateur a déjà annulé la capture */
+    }
   }
 }
 
@@ -495,7 +564,11 @@ const hold = (id: string, action: TouchAction) => {
     if (state.screen !== 'race' || state.paused || (e.pointerType === 'mouse' && e.button !== 0)) return;
     e.preventDefault();
     const target = e.currentTarget as HTMLElement;
-    try { target.setPointerCapture(e.pointerId); } catch { /* capture facultative */ }
+    try {
+      target.setPointerCapture(e.pointerId);
+    } catch {
+      /* capture facultative */
+    }
     touchPointers.press(e.pointerId, action);
     pointerTargets.set(e.pointerId, target);
     target.classList.add('active');
@@ -605,7 +678,8 @@ function togglePause(v: boolean) {
     window.clearTimeout(finishTimeout);
     finishTimeout = 0;
     const s = engine.stats;
-    $('pauseStats').textContent = `${s.fps} FPS · ${s.particles} particules · rendu ×${s.pixelRatio.toFixed(2)} · qualité ${engine.quality.level}`;
+    $('pauseStats').textContent =
+      `${s.fps} FPS · ${s.particles} particules · rendu ×${s.pixelRatio.toFixed(2)} · qualité ${engine.quality.level}`;
   } else {
     if (engine.race.phase === 'finished') {
       window.clearTimeout(finishTimeout);
@@ -631,12 +705,24 @@ $('loading').classList.add('hidden');
 
 /* hook de debug pour les captures automatisées */
 (window as any).__tka = {
-  start: (opts?: { circuit?: number; driver?: number; quality?: QualityLevel }) => {
+  start: (opts?: {
+    circuit?: number;
+    driver?: number;
+    vehicle?: number;
+    difficulty?: Difficulty;
+    quality?: QualityLevel;
+  }) => {
     if (opts?.circuit !== undefined) state.circuitIndex = opts.circuit;
     if (opts?.driver !== undefined) state.driverIndex = opts.driver;
+    if (opts?.vehicle !== undefined) state.vehicleIndex = opts.vehicle;
+    if (opts?.difficulty) state.difficulty = opts.difficulty;
     if (opts?.quality) state.quality = opts.quality;
     startRace();
   },
+  updateHud,
+  vehicles: VEHICLES,
+  drivers: ROSTER,
+  circuits: CIRCUITS,
   quit: showMenu,
   restart: restartRace,
   engine: () => engine,
@@ -663,15 +749,20 @@ $('loading').classList.add('hidden');
   setAutopilot: (v: boolean) => {
     if (engine) engine.autopilot = v;
   },
-  /** Rend exactement N frames de durée fixe (captures déterministes). */
-  step: (n = 1, dtMs = 16.67) => {
+  /** Advance N fixed frames; render the final state, or every frame for benchmarks. */
+  step: (n = 1, dtMs = 16.67, renderEach = false) => {
     if (!engine || state.paused) return;
     let t = performance.now();
     for (let i = 0; i < n; i++) {
       t += dtMs;
       engine.setInput({ steer: currentSteer(), drift: currentDrift(), brake: currentBrake(), throttle: 1 });
-      engine.frame(t);
+      engine.frame(t, renderEach || i === n - 1);
     }
     updateHud();
   },
 };
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && state.screen === 'menu' && !garageRaf)
+    garageRaf = requestAnimationFrame(garageFrame);
+});

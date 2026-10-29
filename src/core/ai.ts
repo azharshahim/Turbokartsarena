@@ -162,8 +162,7 @@ export function thinkAi(
   const aimX = ahead.x + ahead.rx * latTarget;
   const aimZ = ahead.z + ahead.rz * latTarget;
   const aimHeading = Math.atan2(aimX - st.x, aimZ - st.z);
-  const headingTarget =
-    tangentHeading * (1 - T.pursuitBlend) + aimHeading * T.pursuitBlend;
+  const headingTarget = tangentHeading * (1 - T.pursuitBlend) + aimHeading * T.pursuitBlend;
   const hErr = wrap(headingTarget - st.heading);
   const latErr = latTarget - st.lateralOffset;
   // latErr > 0 ⇒ la cible est à droite ⇒ braquer à droite ⇒ terme négatif (interne)
@@ -192,7 +191,11 @@ export function thinkAi(
     const entry = Math.sqrt(vCorner * vCorner + 2 * T.brakeDecel * Math.max(0, d - 6));
     if (entry < vAllowed) vAllowed = entry;
   }
-  vAllowed *= T.cornerMargin;
+  // New vehicle chassis have different steering response; slow down before
+  // a turn and when displaced rather than asking grip to correct at full speed.
+  const chassisMargin = kart.profile.vehicleId ? (kart.stats.bike ? 0.92 : 0.96) : 1;
+  vAllowed *= T.cornerMargin * chassisMargin * (track.layout.rain ? 0.94 : 1);
+  if (kart.profile.vehicleId && Math.abs(st.lateralOffset) > ahead.halfWidth * 0.7) vAllowed *= 0.8;
   let brake = !st.drifting && v > vAllowed;
   if (st.drifting && v > vAllowed * 1.22) brake = true;
   if (brain.brakeHold > 0) brake = true;

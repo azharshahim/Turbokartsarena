@@ -21,6 +21,8 @@ export interface TrackLayout {
   name: string;
   theme: string;
   seed: number;
+  rain?: boolean;
+  guardrails?: boolean;
   /** Points de contrôle de la spline fermée (y = altitude). */
   control: TrackControlPoint[];
   /** Largeur de base (m). */
