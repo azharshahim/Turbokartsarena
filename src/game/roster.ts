@@ -5,6 +5,10 @@
 
 export interface KartProfile {
   id: string;
+  /** Independent vehicle selection; legacy profiles remain valid. */
+  vehicleId?: string;
+  riderColor?: number;
+  riderAccent?: number;
   name: string;
   tagline: string;
   /** Couleur de la carrosserie. */
@@ -153,6 +157,70 @@ export const ROSTER: KartProfile[] = [
     handling: 1.06,
     mass: 0.9,
     shape: 'formula',
+  },
+  {
+    id: 'lina',
+    name: 'Lina Sol',
+    tagline: 'Éclaireuse alpine · précision',
+    bodyColor: 16119295,
+    accentColor: 5084927,
+    suitColor: 2381436,
+    skinColor: 14261111,
+    visorColor: 10480383,
+    speed: 1,
+    accel: 1.02,
+    grip: 1,
+    handling: 1,
+    mass: 1,
+    shape: 'compact',
+  },
+  {
+    id: 'idris',
+    name: 'Idris Sirocco',
+    tagline: 'Rallye du désert · endurance',
+    bodyColor: 14787648,
+    accentColor: 4541497,
+    suitColor: 11954486,
+    skinColor: 7159076,
+    visorColor: 16770413,
+    speed: 1.07,
+    accel: 0.9,
+    grip: 0.96,
+    handling: 0.9,
+    mass: 1,
+    shape: 'compact',
+  },
+  {
+    id: 'aya',
+    name: 'Aya Mori',
+    tagline: 'Pilote de nuit · trajectoires nettes',
+    bodyColor: 14113775,
+    accentColor: 6349789,
+    suitColor: 10299516,
+    skinColor: 15315854,
+    visorColor: 7927039,
+    speed: 0.97,
+    accel: 1.08,
+    grip: 0.92,
+    handling: 1.1,
+    mass: 1,
+    shape: 'compact',
+  },
+  {
+    id: 'nilo',
+    name: 'Nilo Costa',
+    tagline: 'Coastal racing · souplesse',
+    bodyColor: 3974112,
+    accentColor: 15263402,
+    suitColor: 2260840,
+    skinColor: 9658176,
+    visorColor: 16757600,
+    speed: 0.95,
+    accel: 1.12,
+    grip: 1.06,
+    handling: 1.14,
+    mass: 1,
+    shape: 'compact',
   },
 ];
 

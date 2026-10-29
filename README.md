@@ -1,7 +1,10 @@
 # Turbo Karts Arena
 
-Jeu de course de karts arcade 3D, **100 % original**, pour Android (Expo / React Native + three.js).
-Paysage, 60 FPS, trois circuits, huit pilotes, 5 adversaires IA.
+Jeu de course de karts et de motos arcade 3D, **100 % original**, pour Android (Expo / React Native + three.js).
+Version 2.0 : huit circuits, douze pilotes, quatre karts, quatre motos et cinq adversaires IA.
+Paysage, qualité graphique adaptative et PWA hors connexion. Les performances réelles dépendent de l’appareil.
+
+Voir [le dossier de revue V2](docs/V2.md) pour les nouveautés, les validations et la procédure Android.
 
 > Ce dépôt contient **deux hôtes pour un seul moteur** :
 >
@@ -83,14 +86,19 @@ src/
 │   ├── track.ts          spline fermée, largeur variable, dévers, requêtes O(1)
 │   ├── kart.ts           physique du kart, dérapage/turbo, collisions
 │   ├── ai.ts             pilotes IA (anticipation de courbure + profil de vitesse)
+│   ├── hazards.ts        dangers dérivés du tracé, avertissements et placement des panneaux
 │   └── race.ts           tours, classement, événements, pas fixe 120 Hz
 ├── game/
-│   ├── roster.ts         8 pilotes originaux (archétypes + silhouettes)
-│   └── circuits.ts       3 circuits + palettes / ambiances
+│   ├── roster.ts         12 pilotes originaux (archétypes + silhouettes)
+│   ├── circuits.ts       8 circuits + palettes / ambiances
+│   └── vehicles.ts       véhicules indépendants des pilotes et niveaux de difficulté
 ├── render/               three.js
 │   ├── world.ts          moteur partagé Android ↔ web (caméra, LOD, résolution adaptative)
 │   ├── trackMesh.ts      ruban de route, vibreurs, lignes, plaques de turbo, barrières
-│   ├── models.ts         karts procéduraux (5 silhouettes), pilote articulé, décor
+│   ├── models.ts         matériaux partagés et décor
+│   ├── vehicles.ts       huit modèles détaillés, roues animées et pilotes articulés
+│   ├── roadside.ts       panneaux, glissières, tunnels, viaducs, trafic et pluie
+│   ├── showroom.ts       garage 3D partagé navigateur / Android
 │   ├── sky.ts            skybox HDR procédurale + environnement PBR préconvolué
 │   ├── particles.ts      systèmes de particules en pooling (1 draw call chacun)
 │   ├── postfx.ts         bloom, flou radial, aberration, lignes de vitesse, FXAA
@@ -310,8 +318,11 @@ node tools/compress-astc.mjs         # 6×6, qualité 6 → assets/astc/ + manif
 ## 8. Tests
 
 ```bash
-npm test                 # 25 tests moteur / géométrie / IA, sans navigateur
+npm test                 # tests moteur / géométrie / IA sur les huit circuits
+npm run test:v2          # matrice circuits/véhicules, physique moto, modèles et panneaux
 npm run test:browser     # scénarios Playwright pause, commandes, orientation et console
+npm run test:browser:v2  # garage, pilotes, huit véhicules/circuits et budget de rendu
+npm run test:pwa         # installation, hors connexion et mises à jour du cache
 npm run typecheck        # vérifie les types React Native + preview
 npx expo export --platform android --output-dir /tmp/tka-android-export  # bundle Expo Android
 ```

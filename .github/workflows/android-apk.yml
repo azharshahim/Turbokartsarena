@@ -2,10 +2,15 @@ name: Android APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/arena-v2]
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Publier explicitement un APK depuis main'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -26,10 +31,21 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - run: npm run test:v2
       - run: npm run preview:build
       - name: Installer Chromium pour Playwright
         run: npx playwright install --with-deps chromium
-      - run: npm run test:browser
+      - name: Régressions navigateur via HTTP
+        run: |
+          node tools/serve-preview.mjs > /tmp/tka-preview.log 2>&1 &
+          PREVIEW_PID=$!
+          trap 'kill "$PREVIEW_PID" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            curl --fail --silent http://127.0.0.1:5173/index.html > /dev/null && break
+            sleep 1
+          done
+          BROWSER_TEST_URL=http://127.0.0.1:5173/index.html npm run test:browser
+      - run: npm run test:browser:v2
       - run: npm run test:pwa
       - run: npx expo prebuild --platform android --no-install
       - name: "Build APK (release, signé avec la clé debug : installable directement)"
@@ -42,7 +58,7 @@ jobs:
           name: turbo-karts-arena-apk
           path: turbo-karts-arena.apk
       - name: Publier dans les Releases
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: android-latest

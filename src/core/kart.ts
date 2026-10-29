@@ -8,6 +8,7 @@
  *  - Aucune allocation mémoire dans la boucle chaude (tout est réutilisé) pour tenir 60 FPS.
  */
 
+import { vehicleFor } from '../game/vehicles';
 import { PHYSICS } from './config';
 import { clamp, damp, dampAngle, lerp, smoothstep } from './math';
 import type { KartProfile } from '../game/roster';
@@ -174,6 +175,9 @@ export interface EffectiveStats {
   accel: number;
   grip: number;
   turnRate: number;
+  brake: number;
+  stability: number;
+  bike: boolean;
   driftGrip: number;
   mass: number;
 }
@@ -187,6 +191,9 @@ export function effectiveStats(profile: KartProfile): EffectiveStats {
     turnRate: k.turnRate * profile.handling,
     driftGrip: k.gripDrift * profile.grip,
     mass: profile.mass,
+    brake: vehicleFor(profile)?.brake ?? 1,
+    stability: vehicleFor(profile)?.stability ?? 1,
+    bike: !!vehicleFor(profile) && vehicleFor(profile)!.kind !== 'kart',
   };
 }
 
@@ -344,13 +351,9 @@ export class Kart {
       st.driftCharge = Math.min(D.chargeMax, st.driftCharge + gain * dt);
 
       const tiers = D.tiers;
-      st.driftTier = (st.driftCharge >= tiers[3]
-        ? 3
-        : st.driftCharge >= tiers[2]
-          ? 2
-          : st.driftCharge >= tiers[1]
-            ? 1
-            : 0) as DriftTier;
+      st.driftTier = (
+        st.driftCharge >= tiers[3] ? 3 : st.driftCharge >= tiers[2] ? 2 : st.driftCharge >= tiers[1] ? 1 : 0
+      ) as DriftTier;
 
       // fin du dérapage : frein, relâchement, ou marche arrière
       const released = !wantDrift && st.driftTime > 0.15;
@@ -361,7 +364,8 @@ export class Kart {
         this.endDrift(track, raceTime);
       }
     }
-    if (!st.drifting && st.driftReleasedTime > 0) st.driftReleasedTime = Math.max(0, st.driftReleasedTime - dt);
+    if (!st.drifting && st.driftReleasedTime > 0)
+      st.driftReleasedTime = Math.max(0, st.driftReleasedTime - dt);
 
     /* ---------- 4. turbo ---------- */
     if (st.boostTime > 0) st.boostTime = Math.max(0, st.boostTime - dt);
@@ -404,7 +408,7 @@ export class Kart {
     // freinage / marche arrière
     if (st.brakeAmount > 0.05) {
       if (vf > 0.6) {
-        vf -= P.brakeDecel * st.brakeAmount * dt;
+        vf -= P.brakeDecel * this.stats.brake * st.brakeAmount * dt;
       } else {
         const revMax = P.reverseMaxSpeed;
         if (vf > -revMax) vf -= this.stats.accel * 0.55 * st.brakeAmount * dt;
@@ -440,7 +444,7 @@ export class Kart {
       targetYaw = st.steer * base * speedDrop;
       if (absVf < 0.35) targetYaw = st.steer * 1.2;
     }
-    st.yawRate = damp(st.yawRate, targetYaw, st.drifting ? 8.5 : 11.5, dt);
+    st.yawRate = damp(st.yawRate, targetYaw, (st.drifting ? 8.5 : 11.5) / this.stats.stability, dt);
     if (!st.airborne) st.heading += st.yawRate * dt;
 
     /* ---------- 7. adhérence latérale ---------- */
@@ -449,7 +453,9 @@ export class Kart {
       : st.surface === 'grass'
         ? PHYSICS.kart.gripDirt
         : this.stats.grip;
-    const grip = st.airborne ? 1.2 : gripBase;
+    const grip = st.airborne
+      ? 1.2
+      : gripBase * (track.layout.rain ? 0.85 : 1) * (this.stats.bike && st.drifting ? 1.25 : 1);
     const decay = 1 - Math.exp(-grip * dt);
     vl -= vl * decay;
 
@@ -482,6 +488,29 @@ export class Kart {
     st.x += st.vx * dt;
     st.z += st.vz * dt;
 
+    // Continuous safety rails follow the same width samples as the rendered
+    // steel barriers. Resolve only local contacts; distant off-track states still
+    // use the existing respawn recovery, rather than teleporting across a loop.
+    if (track.layout.guardrails) {
+      const edge = track.query(st.x, st.z, st.trackIndex);
+      const limit = edge.halfWidth + (this.stats.bike ? 1.7 : 1.35);
+      if (Math.abs(edge.lateral) > limit && Math.abs(edge.lateral) < edge.halfWidth + 5) {
+        const side = Math.sign(edge.lateral);
+        const pos = track.worldAt(edge.s, side * limit);
+        const sample = track.sampleAtDistance(edge.s);
+        st.x = pos.x;
+        st.z = pos.z;
+        const outward = (st.vx * sample.rx + st.vz * sample.rz) * side;
+        if (outward > 0) {
+          st.vx -= sample.rx * side * outward * 1.25;
+          st.vz -= sample.rz * side * outward * 1.25;
+          st.vx *= 0.88;
+          st.vz *= 0.88;
+          st.bounce = 0.15;
+        }
+      }
+    }
+
     // vertical : saut / rampes / atterrissage
     if (st.airborne) {
       st.vy -= PHYSICS.gravity * dt;
@@ -495,7 +524,9 @@ export class Kart {
         st.airTime = 0;
       }
     } else {
-      if (st.y > groundY + 0.06) {
+      // Suspension follows ordinary downhill grades; only a real drop leaves
+      // the road. A 6 cm threshold disabled steering on every steep descent.
+      if (st.y > groundY + 0.65) {
         st.airborne = true;
         st.vy = 0;
       } else {
@@ -521,7 +552,9 @@ export class Kart {
     /* ---------- 11. visuel ---------- */
     const slip = Math.atan2(vl, Math.max(4, Math.abs(vf)));
     st.visualYawSlip = damp(st.visualYawSlip, clamp(slip, -0.7, 0.7), 10, dt);
-    const rollTarget = clamp(-st.yawRate * Math.abs(vf) * 0.0055, -0.16, 0.16);
+    const rollTarget = this.stats.bike
+      ? clamp(-Math.atan((st.yawRate * Math.abs(vf)) / 28), -0.65, 0.65)
+      : clamp(-st.yawRate * Math.abs(vf) * 0.0055, -0.16, 0.16);
     st.visualRoll = damp(st.visualRoll, rollTarget, 8, dt);
     const pitchTarget = st.airborne
       ? clamp(-st.vy * 0.018, -0.22, 0.22)
@@ -628,7 +661,10 @@ const _impact = { x: 0, z: 0, power: 0 };
  * Collisions circulaires avec impulsion : les karts se poussent, se percutent
  * et encaissent un "bump" visuel. O(n²) avec n ≤ 8 → négligeable.
  */
-export function resolveKartCollisions(karts: Kart[], dt: number): Array<{ a: Kart; b: Kart; power: number; x: number; z: number }> {
+export function resolveKartCollisions(
+  karts: Kart[],
+  dt: number,
+): Array<{ a: Kart; b: Kart; power: number; x: number; z: number }> {
   const results: Array<{ a: Kart; b: Kart; power: number; x: number; z: number }> = [];
   const R = PHYSICS.kart.radius;
   const minDist = R * 2;

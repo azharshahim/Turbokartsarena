@@ -17,6 +17,9 @@
  */
 
 import * as THREE from 'three';
+import { createRoadside } from './roadside';
+import { upcomingHazard } from '../core/hazards';
+import type { Difficulty } from '../game/vehicles';
 import { Race } from '../core/race';
 import { makeBrain, thinkAi, type AiBrain } from '../core/ai';
 import type { DriveInput } from '../core/kart';
@@ -26,7 +29,14 @@ import type { Circuit, CircuitTheme } from '../game/circuits';
 import { THEMES } from '../game/circuits';
 import type { KartProfile } from '../game/roster';
 import { buildTrackMesh, type TrackMesh } from './trackMesh';
-import { createKart, createMaterials, createScenery, type KartModel, type MaterialLibrary, type SceneryResult } from './models';
+import {
+  createKart,
+  createMaterials,
+  createScenery,
+  type KartModel,
+  type MaterialLibrary,
+  type SceneryResult,
+} from './models';
 import { createPostFX, type PostFX } from './postfx';
 import { EffectsRegistry } from './particles';
 import { buildEnvironment, SkyDome } from './sky';
@@ -43,6 +53,7 @@ export interface EngineOptions {
   circuit: Circuit;
   profile: KartProfile;
   laps: number;
+  difficulty?: Difficulty;
   onFrame?: (dt: number) => void;
   onFinish?: () => void;
 }
@@ -68,6 +79,7 @@ export class PhysicsEngine {
   private sky: SkyDome;
   private materials: MaterialLibrary;
   private scenery: SceneryResult;
+  readonly roadside: ReturnType<typeof createRoadside>;
   private trackMesh: TrackMesh;
   private effects: EffectsRegistry;
   private kartVisuals: KartModel[] = [];
@@ -80,6 +92,7 @@ export class PhysicsEngine {
   /* caméra / ressenti */
   private camPos = new THREE.Vector3();
   private camLook = new THREE.Vector3();
+  private camDesired = new THREE.Vector3();
   private camYaw = 0;
   private shake = 0;
   private camFov = 62;
@@ -138,7 +151,12 @@ export class PhysicsEngine {
     }
 
     /* ---------------- scène ---------------- */
-    this.camera = new THREE.PerspectiveCamera(this.camFov, this.width / this.height, 0.4, this.quality.drawDistance * 1.6);
+    this.camera = new THREE.PerspectiveCamera(
+      this.camFov,
+      this.width / this.height,
+      0.4,
+      this.quality.drawDistance * 1.6,
+    );
     this.scene.fog = new THREE.FogExp2(this.theme.fogColor, this.theme.fogDensity);
 
     this.sky = new SkyDome(this.theme);
@@ -147,7 +165,12 @@ export class PhysicsEngine {
     /* environnement PBR préconvolué (reflets réalistes sans fichier HDR) */
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     pmrem.compileCubemapShader();
-    const env = buildEnvironment(this.renderer, this.theme, pmrem, this.quality.level === 'ultra' ? 256 : 128);
+    const env = buildEnvironment(
+      this.renderer,
+      this.theme,
+      pmrem,
+      this.quality.level === 'ultra' ? 256 : 128,
+    );
     this.scene.environment = env.texture;
     this.scene.environmentIntensity = this.theme.mood === 'night' ? 0.4 : 0.45;
     this.disposeFns.push(() => {
@@ -156,7 +179,11 @@ export class PhysicsEngine {
     });
 
     /* ---------------- lumières ---------------- */
-    this.hemi = new THREE.HemisphereLight(this.theme.hemiSky, this.theme.hemiGround, this.theme.hemiIntensity);
+    this.hemi = new THREE.HemisphereLight(
+      this.theme.hemiSky,
+      this.theme.hemiGround,
+      this.theme.hemiIntensity,
+    );
     this.scene.add(this.hemi);
 
     this.sun = new THREE.DirectionalLight(this.theme.sunColor, this.theme.sunIntensity);
@@ -190,8 +217,13 @@ export class PhysicsEngine {
     this.scene.add(this.fill.target);
 
     /* ---------------- course ---------------- */
-    this.race = new Race({ circuit: opts.circuit, playerProfile: opts.profile, opponents: 5 });
-    void opts.laps;
+    this.race = new Race({
+      circuit: opts.circuit,
+      playerProfile: opts.profile,
+      opponents: 5,
+      laps: opts.laps,
+      difficulty: opts.difficulty,
+    });
 
     /* ---------------- matériaux / géométries ---------------- */
     this.materials = createMaterials(this.theme, this.quality);
@@ -213,7 +245,18 @@ export class PhysicsEngine {
       const t = clamp(over / 7.5, 0, 1);
       const s = t * t * (3 - 2 * t);
       const clearance = lerp(0.68, 0.12, s);
-      pos.setY(i, h - clearance);
+      // A viaduct needs visible space under its deck instead of buried piers.
+      // Only visual terrain is lowered; the sampled driving ribbon stays intact.
+      let valley = 0;
+      for (const feature of opts.circuit.features ?? []) {
+        if (feature.kind !== 'bridge') continue;
+        const fraction = q.s / track.length;
+        if (fraction > feature.start && fraction < feature.end) {
+          const along = Math.sin(((fraction - feature.start) / (feature.end - feature.start)) * Math.PI);
+          valley = Math.max(valley, Math.pow(along, 0.6) * 8 * (1 - smoothstep(3, 18, over)));
+        }
+      }
+      pos.setY(i, h - clearance - valley);
     }
     terrainGeo.computeVertexNormals();
     const groundMesh = new THREE.Mesh(terrainGeo, this.materials.grass);
@@ -240,6 +283,13 @@ export class PhysicsEngine {
     }));
     this.scenery = createScenery(this.theme, this.materials, this.quality, trackPoints, opts.circuit.seed);
     this.scene.add(this.scenery.group);
+    this.roadside = createRoadside(this.race.track, opts.circuit, this.quality);
+    this.scene.add(this.roadside.group);
+    if (opts.circuit.rain) {
+      this.materials.road.roughness = 0.3;
+      this.materials.road.metalness = 0.15;
+    }
+    if (opts.circuit.environment === 'dunes') this.materials.road.color.setHex(0xe0bf8d);
 
     /* ---------------- karts ---------------- */
     for (const kart of this.race.karts) {
@@ -263,6 +313,10 @@ export class PhysicsEngine {
     /* ---------------- particules ---------------- */
     const smokeTex = smokeTexture(this.quality.level === 'low' ? 64 : 128).albedo;
     const glowTex = glowTexture(this.quality.level === 'low' ? 64 : 128).albedo;
+    this.disposeFns.push(() => {
+      smokeTex.dispose();
+      glowTex.dispose();
+    });
     this.effects = new EffectsRegistry({ smoke: smokeTex, glow: glowTex }, this.quality.particleBudget);
     for (const p of this.effects.all()) this.scene.add(p.points);
 
@@ -323,7 +377,7 @@ export class PhysicsEngine {
   /* Boucle                                                             */
   /* ------------------------------------------------------------------ */
 
-  frame(timeMs: number) {
+  frame(timeMs: number, render = true) {
     const t = timeMs * 0.001;
     let dt = this.lastTime === 0 ? 1 / 60 : t - this.lastTime;
     this.lastTime = t;
@@ -339,6 +393,7 @@ export class PhysicsEngine {
 
     /* ---- visuels ---- */
     this.syncKarts(dt);
+    this.roadside.update(dt, this.player.state.x, this.player.state.y, this.player.state.z);
     this.updateCamera(dt);
     this.sky.update(this.camera, this.elapsed);
     this.trackMesh.update(this.elapsed, 1);
@@ -356,9 +411,13 @@ export class PhysicsEngine {
     this.updatePostFX(dt);
 
     /* ---- rendu ---- */
-    this.postfx.render(dt);
-    const gl = this.renderer.getContext() as any;
-    if (this.isNative && typeof gl.endFrameEXP === 'function') gl.endFrameEXP();
+    if (render) {
+      this.renderer.info.autoReset = false;
+      this.renderer.info.reset();
+      this.postfx.render(dt);
+      const gl = this.renderer.getContext() as any;
+      if (this.isNative && typeof gl.endFrameEXP === 'function') gl.endFrameEXP();
+    }
 
     /* ---- résolution dynamique ---- */
     this.frameAvg = lerp(this.frameAvg, dt, 0.08);
@@ -375,7 +434,8 @@ export class PhysicsEngine {
       switch (e.type) {
         case 'impact': {
           this.effects.impact(e.x, e.y, e.z, e.power);
-          if (isPlayer(e.kartId) || isPlayer((e as any).otherId)) this.shake = Math.min(1, this.shake + e.power * 0.06);
+          if (isPlayer(e.kartId) || isPlayer((e as any).otherId))
+            this.shake = Math.min(1, this.shake + e.power * 0.06);
           break;
         }
         case 'pad':
@@ -428,7 +488,12 @@ export class PhysicsEngine {
 
       // roues : rotation + braquage
       vis.wheelSpin += (st.speed / 0.42) * dt;
-      const steerAngle = damp(vis.steerVisual, st.steer * 0.5 + (st.drifting ? st.driftDir * 0.16 : 0), 12, dt);
+      const steerAngle = damp(
+        vis.steerVisual,
+        st.steer * 0.5 + (st.drifting ? st.driftDir * 0.16 : 0),
+        12,
+        dt,
+      );
       vis.steerVisual = steerAngle;
       for (let w = 0; w < model.wheels.length; w++) {
         model.wheels[w].rotation.x = vis.wheelSpin;
@@ -461,7 +526,7 @@ export class PhysicsEngine {
       if (boosting && Math.random() < 0.9) {
         this.effects.boostJet(st.x, st.y, st.z, fwdX, fwdZ, tier);
       }
-      if (st.surface === 'grass' && Math.abs(st.speed) > 6) {
+      if ((st.surface === 'grass' || this.circuit.environment === 'dunes') && Math.abs(st.speed) > 6) {
         this.effects.offRoadDust(st.x, st.y, st.z, Math.abs(st.speed), dt);
       }
     }
@@ -482,11 +547,11 @@ export class PhysicsEngine {
     this.camYaw = dampAngle(this.camYaw, headingTarget, st.drifting ? 5.5 : 7.5, dt);
 
     const back = 5.9 + speedNorm * 1.5;
-    const up = 2.55 + speedNorm * 0.4;
+    const up = (kart.stats.bike ? 2.75 : 2.55) + speedNorm * 0.4;
     const fwdX = Math.sin(this.camYaw);
     const fwdZ = Math.cos(this.camYaw);
 
-    const desired = new THREE.Vector3(st.x - fwdX * back, st.y + up, st.z - fwdZ * back);
+    const desired = this.camDesired.set(st.x - fwdX * back, st.y + up, st.z - fwdZ * back);
     // la caméra ne traverse pas le sol de la piste
     const groundY = this.race.track.query(desired.x, desired.z, st.trackIndex).y;
     desired.y = Math.max(desired.y, groundY + 1.5);
@@ -522,11 +587,7 @@ export class PhysicsEngine {
       this.camera.updateProjectionMatrix();
     }
 
-    this.fill.position.set(
-      st.x - Math.sin(st.heading) * 60,
-      st.y + 45,
-      st.z - Math.cos(st.heading) * 60,
-    );
+    this.fill.position.set(st.x - Math.sin(st.heading) * 60, st.y + 45, st.z - Math.cos(st.heading) * 60);
     this.fill.target.position.set(st.x, st.y, st.z);
     this.fill.target.updateMatrixWorld();
 
@@ -610,6 +671,9 @@ export class PhysicsEngine {
       place: k.state.place,
       lap: k.state.lap,
       phase: this.race.phase,
+      hazard: upcomingHazard(this.roadside.hazards, k.state.s, this.race.track.length, k.state.speed),
+      drawCalls: this.renderer.info.render.calls,
+      triangles: this.renderer.info.render.triangles,
       fps: Math.round(1 / Math.max(1e-3, this.frameAvg)),
       pixelRatio: this.currentPixelRatio,
       particles: this.effects.all().reduce((a, p) => a + p.activeCount, 0),
@@ -626,10 +690,12 @@ export class PhysicsEngine {
     this.trackMesh.dispose();
     this.terrain?.geometry.dispose();
     this.scenery.dispose();
+    this.roadside.dispose();
     this.materials.dispose();
     this.sky.dispose();
     this.postfx.dispose();
     this.renderer.dispose();
+    if (!this.isNative) this.renderer.forceContextLoss();
     void smoothstep;
   }
 }
@@ -638,7 +704,7 @@ export class PhysicsEngine {
  * expo-gl expose un contexte sans canvas DOM. three.js a besoin d'un objet
  * minimal (style, dimensions, événements) : on lui fournit ce shim.
  */
-function makeCanvasShim(gl: any) {
+export function makeCanvasShim(gl: any) {
   const vga: any = {
     width: gl.drawingBufferWidth,
     height: gl.drawingBufferHeight,

@@ -11,6 +11,8 @@
  */
 
 import * as THREE from 'three';
+import { vehicleFor } from '../game/vehicles';
+import { createVehicle } from './vehicles';
 import type { KartProfile } from '../game/roster';
 import type { CircuitTheme } from '../game/circuits';
 import type { QualitySettings } from '../core/config';
@@ -60,8 +62,8 @@ function std(set: TextureSet, repeat: number, extra: Partial<THREE.MeshStandardM
 export function createMaterials(theme: CircuitTheme, q: QualitySettings): MaterialLibrary {
   const size = q.textureSize;
   const aniso = q.anisotropy;
-  const isSand = theme.id === 'desert';
-  const isCity = theme.id === 'neon';
+  const isSand = (theme.id === 'desert' || theme.id === 'sahara');
+  const isCity = (theme.id === 'neon' || theme.id === 'tokyo');
 
   const asphalt = asphaltTexture(size, aniso, isCity ? 0.3 : 0.34);
   const curb = curbTexture(size, aniso, theme.curbColors[0], theme.curbColors[1]);
@@ -125,7 +127,12 @@ export function createMaterials(theme: CircuitTheme, q: QualitySettings): Materi
     glass,
     glow,
     dispose() {
-      for (const m of [road, curbMat, groundMat, paintMat, metalMat, rubber, glass]) m.dispose();
+      const textures = new Set<THREE.Texture>();
+      for (const m of [road, curbMat, groundMat, paintMat, metalMat, rubber, glass]) {
+        for (const texture of [m.map, m.normalMap, m.roughnessMap, m.emissiveMap]) if (texture) textures.add(texture);
+        m.dispose();
+      }
+      for (const texture of textures) texture.dispose();
       for (const m of Object.values(glow)) m.dispose();
     },
   };
@@ -159,6 +166,7 @@ const SHARED_GEO = {
 };
 
 export function createKart(profile: KartProfile, mats: MaterialLibrary, q: QualitySettings): KartModel {
+  if (vehicleFor(profile)) return createVehicle(profile, q);
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
@@ -441,8 +449,8 @@ export function createScenery(
   /* --- végétation / rochers dispersés le long de la piste --- */
   const count = q.treeCount;
   const variants: THREE.Object3D[] = [];
-  const isNight = theme.id === 'neon';
-  const isDesert = theme.id === 'desert';
+  const isNight = (theme.id === 'neon' || theme.id === 'tokyo');
+  const isDesert = (theme.id === 'desert' || theme.id === 'sahara');
 
   // 3 variantes réutilisées par InstancedMesh (un appel de dessin par variante)
   // Chaque variante est un petit "buisson d'arbres" fusionné (tronc + 3 houppes) :
@@ -794,7 +802,7 @@ export function createScenery(
       arch.castShadow = q.shadows;
       group.add(arch);
     }
-  } else {
+  } else if (theme.id === 'coast' || theme.id === 'mediterranean') {
     // mer au large + parasols + nuages bas
     const seaGeo = new THREE.CircleGeometry(520, 24);
     disposables.push(seaGeo);

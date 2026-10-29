@@ -159,6 +159,22 @@
         .panel { padding: 7px 10px; }
         #pauseBtn { min-width: 56px; }
       }
+      #menu { overflow-y:auto; justify-content:flex-start; padding:20px max(18px,env(safe-area-inset-left)); }
+      #menu h1 {font-size:32px; flex-shrink:0;} #menu .sub {font-size:11px; margin:0;}
+      .garageLayout {display:grid;grid-template-columns:minmax(240px,1fr) minmax(300px,440px);gap:28px;width:min(1100px,100%);align-items:center;}
+      .garageView {min-width:0;align-self:start;position:sticky;top:12px;background:radial-gradient(ellipse,#223653,transparent 70%);border-radius:24px;}
+      #garageCanvas {width:100%;height:clamp(210px,44vh,420px);display:block;}
+      #garageLabel {font-size:13px;color:#b7cce8;padding:8px;}
+      .garageOptions {display:flex;flex-direction:column;align-items:center;gap:10px;min-width:0;}
+      #menu .pickTitle {font-size:18px;min-width:0;} #menu .pickSub {font-size:11px;max-width:280px;}
+      #menu .row {width:100%;justify-content:space-between;gap:8px;margin-top:0!important;}
+      #menu .arrow {flex-shrink:0;min-width:44px;min-height:44px;}
+      #menu .play {height:50px;min-height:50px;margin:0;} #menu .hint {font-size:11px;}
+      #menu .stats {width:100%;} #menu .tools {justify-content:center;gap:6px;}
+      #hazardWarning {position:absolute;top:100px;left:50%;transform:translateX(-50%);font-size:13px;color:#ffe8ad;background:#171e2dcf;border-radius:8px;padding:6px 12px;pointer-events:none;white-space:nowrap;}
+      #hazardWarning:empty {display:none;}
+      @media(max-width:650px) and (orientation:portrait){.garageLayout{grid-template-columns:1fr;gap:8px}.garageView{position:relative;top:0}#garageCanvas{height:210px}#menu .garageOptions{padding-bottom:24px}}
+      @media(max-height:500px) and (orientation:landscape){#menu{padding-top:8px;gap:4px}#menu h1{font-size:24px}.garageLayout{gap:18px}#menu .hint{display:none}#menu .garageOptions{gap:5px}#menu .statRow{font-size:9px}#menu .pickSub{font-size:10px}#menu .tools .tool{padding:8px}}
     </style>
   </head>
   <body>
@@ -207,6 +223,7 @@
       </svg>
 
       <div id="countdown"></div>
+      <div id="hazardWarning" role="status" aria-live="polite"></div>
       <div id="toast"></div>
 
       <div id="controls">
@@ -219,7 +236,7 @@
         </button>
         <button class="actionBtn" id="driftBtn" type="button" aria-label="Maintenir pour déraper" style="position: relative">
           <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M3 17c3.5 0 4-9 8-9s4.5 9 8 9"/><path d="M16 5.5l3 2.5-3 2.5"/><circle cx="6.5" cy="19.5" r="1.6" fill="#fff"/><circle cx="17.5" cy="19.5" r="1.6" fill="#fff"/></svg>
-          DÉRAPAGE
+          <span id="driftLabel">DÉRAPAGE</span>
         </button>
       </div>
     </div>
@@ -228,26 +245,35 @@
     <div class="overlay" id="menu">
       <div class="glow"></div>
       <h1>TURBO<em> KARTS</em></h1>
-      <div class="sub">A R E N A</div>
+      <div class="sub">A R E N A · 2.0</div>
+      <div class="garageLayout">
+        <div class="garageView"><canvas id="garageCanvas" aria-label="Aperçu 3D du pilote et du véhicule sélectionnés"></canvas><div id="garageLabel"></div></div>
+        <div class="garageOptions">
 
       <div class="row" style="margin-top: 14px">
-        <div class="arrow" id="circPrev">‹</div>
+        <button class="arrow" id="circPrev" aria-label="Circuit précédent">‹</button>
         <div>
           <div class="pickTitle" id="circName">Côte Solaire</div>
           <div class="pickSub" id="circSub">Littoral · virages fluides</div>
         </div>
-        <div class="arrow" id="circNext">›</div>
+        <button class="arrow" id="circNext" aria-label="Circuit suivant">›</button>
       </div>
 
       <div class="row">
-        <div class="arrow" id="driverPrev">‹</div>
+        <button class="arrow" id="driverPrev" aria-label="Pilote précédent">‹</button>
         <div>
           <div class="pickTitle" id="driverName">Nova Vex</div>
           <div class="pickSub" id="driverSub">Pilote d’usine · équilibrée</div>
         </div>
-        <div class="arrow" id="driverNext">›</div>
+        <button class="arrow" id="driverNext" aria-label="Pilote suivant">›</button>
       </div>
 
+      <div class="row">
+        <button class="arrow" id="vehiclePrev" aria-label="Véhicule précédent">‹</button>
+        <div><div class="pickTitle" id="vehicleName"></div><div class="pickSub" id="vehicleSub"></div></div>
+        <button class="arrow" id="vehicleNext" aria-label="Véhicule suivant">›</button>
+      </div>
+      <button class="tool" id="difficultyToggle"></button>
       <div class="stats" id="stats"></div>
 
       <button class="play" id="playBtn">
@@ -259,7 +285,7 @@
         <div class="tool" id="inputToggle">⌨️ Clavier</div>
         <div class="tool" id="qualityToggle">⚙️ Qualité : Auto</div>
         <div class="tool" id="lapsToggle">🏁 3 tours</div>
-        <div class="tool" id="soundToggle">🔊 Son</div>
+
         <div class="tool" id="fpsToggle">📊 FPS</div>
       </div>
 
@@ -268,6 +294,8 @@
         <kbd>P</kbd> pause. L’accélération est <b>automatique</b>. Maintenez le dérapage dans un virage : la jauge passe
         <span style="color:#40c8ff">bleu</span> → <span style="color:#ff9a2e">orange</span> → <span style="color:#c65cff">violet</span>,
         puis relâchez pour envoyer le turbo. Le gyroscope est utilisé automatiquement sur mobile si vous l’activez.
+      </div>
+        </div>
       </div>
     </div>
 
@@ -295,7 +323,7 @@
       <div class="hint" id="pauseStats"></div>
     </div>
 
-    <div id="loading"><div class="spinner"></div><div class="label">GÉNÉRATION DES TEXTURES 2K…</div></div>
+    <div id="loading"><div class="spinner"></div><div class="label">PRÉPARATION DU CIRCUIT…</div></div>
     <div id="fpsBadge">—</div>
 
     <script type="module" src="./preview/main.ts"></script>
