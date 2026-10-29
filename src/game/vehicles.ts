@@ -15,6 +15,8 @@ export interface Vehicle {
   brake: number;
   stability: number;
   shape: KartProfile['shape'];
+  /** Prix Turbo Coins (0/absent = débloqué de base). */
+  price?: number;
 }
 export const VEHICLES: Vehicle[] = [
   {
@@ -145,6 +147,12 @@ export const VEHICLES: Vehicle[] = [
     stability: 1.4,
     shape: 'muscle',
   },
+  { id:'falcon', name:'Falcon K2', description:'Kart · châssis carbone léger', kind:'kart', color:0x22c1ff, accent:0xffffff, speed:1.03, accel:1.08, grip:1.02, handling:1.05, mass:0.92, brake:1.05, stability:1.02, shape:'compact', price:600 },
+  { id:'titan', name:'Titan GP', description:'Kart · moteur coupleux, gros freinage', kind:'kart', color:0xffb020, accent:0x1c2436, speed:1.05, accel:1.0, grip:1.05, handling:0.98, mass:1.12, brake:1.12, stability:1.12, shape:'formula', price:900 },
+  { id:'vortex', name:'Vortex RR', description:'Moto sportive · aérodynamique active', kind:'sport', color:0xb44dff, accent:0xffe14d, speed:1.1, accel:1.14, grip:1.14, handling:0.97, mass:0.86, brake:1.18, stability:1.22, shape:'formula', price:1200 },
+  { id:'onyx', name:'Onyx S', description:'Moto sportive · édition nuit', kind:'sport', color:0x2a3550, accent:0xff4d7e, speed:1.09, accel:1.18, grip:1.1, handling:1.0, mass:0.82, brake:1.16, stability:1.15, shape:'formula', price:1400 },
+  { id:'dune', name:'Dune XT', description:'Moto tout-terrain · suspensions longues', kind:'cross', color:0xff7a3c, accent:0xfff3d6, speed:0.99, accel:1.2, grip:1.06, handling:1.1, mass:0.8, brake:1.0, stability:1.05, shape:'buggy', price:800 },
+  { id:'aurum', name:'Aurum Sovereign', description:'Premium original · finition or et carbone', kind:'touring', color:0xf5c542, accent:0x101828, speed:1.12, accel:1.15, grip:1.18, handling:1.02, mass:1.05, brake:1.22, stability:1.35, shape:'muscle', price:3000 },
 ];
 export type Difficulty = 'discovery' | 'arcade' | 'expert';
 export const DIFFICULTIES: Record<

@@ -1119,7 +1119,7 @@ const ResultsScreen: React.FC<{
   onRestart: () => void;
   onQuit: () => void;
 }> = ({ result, circuitName, profile, onRestart, onQuit }) => (
-  <View style={styles.menu}>
+  <ScrollView style={{flex:1, backgroundColor:'#070a16'}} contentContainerStyle={[styles.menu, { paddingBottom: 96, minHeight: '100%' }]}>
     <Text style={styles.resultsTitle}>{result.place === 1 ? 'VICTOIRE !' : `${result.place}e PLACE`}</Text>
     <Text style={styles.pickerSub}>
       {circuitName} · {profile.name}
@@ -1145,7 +1145,7 @@ const ResultsScreen: React.FC<{
         <Text style={styles.toolText}>Menu</Text>
       </TouchableOpacity>
     </View>
-  </View>
+  </ScrollView>
 );
 
 /* ------------------------------------------------------------------ */
@@ -1267,7 +1267,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 24,
+    bottom: 64,
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 18,
