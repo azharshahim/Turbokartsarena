@@ -21,6 +21,33 @@ import { readFileSync } from 'node:fs';
 
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
+/**
+ * Un clone superficiel (`actions/checkout` par défaut, `--depth 1`) ne contient
+ * pas le commit affiché : on tente de le récupérer avant de conclure. Sans lui,
+ * le contrôle de parenté est simplement ignoré avec un avertissement explicite —
+ * un clone superficiel n'est pas une incohérence de version.
+ */
+function commitAvailable(commit) {
+  try {
+    git('cat-file', '-e', `${commit}^{commit}`);
+    return true;
+  } catch {
+    /* absent du clone */
+  }
+  try {
+    execFileSync('git', ['fetch', '--no-tags', '--depth=1', 'origin', commit], { stdio: 'ignore' });
+  } catch {
+    /* réseau indisponible ou SHA non servi */
+  }
+  try {
+    git('cat-file', '-e', `${commit}^{commit}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+const warnings = [];
+
 const failures = [];
 const infos = [];
 
@@ -58,10 +85,8 @@ if (meta) {
   } else {
     const commit = clean[1];
     let known = true;
-    try {
-      git('cat-file', '-e', `${commit}^{commit}`);
-    } catch {
-      failures.push(`le commit ${commit} affiché n'existe pas dans ce dépôt.`);
+    if (!commitAvailable(commit)) {
+      warnings.push(`commit ${commit} absent du clone (dépôt superficiel) : contrôle de parenté ignoré — lancez « git fetch --unshallow » pour un audit complet.`);
       known = false;
     }
     if (known) {
@@ -106,6 +131,7 @@ if (declared) {
 if (/['"`][0-9a-f]{7,40}['"`]/.test(versionTs)) failures.push('src/core/version.ts contient un hash de commit en dur.');
 
 for (const line of infos) console.log(`  ${line}`);
+for (const line of warnings) console.warn(`  ⚠️  ${line}`);
 if (failures.length) {
   console.error('\n❌ Numéro de build incohérent :');
   for (const failure of failures) console.error(`   • ${failure}`);
