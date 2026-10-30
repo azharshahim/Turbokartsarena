@@ -1,3 +1,4 @@
+import { mountGarage } from './garage';
 /**
  * Turbo Karts Arena — hôte navigateur (preview jouable).
  *
@@ -40,6 +41,13 @@ const state = {
 let engine: PhysicsEngine | null = null;
 let showroom: Showroom | null = null;
 let garageRaf = 0;
+const premiumGarage = mountGarage({
+  garage: () => garage, selected: () => state.vehicleIndex,
+  select: index => { state.vehicleIndex = index; },
+  persist: persistGarage, refresh: () => renderMenu(),
+  reduceMotion: value => { if (showroom) showroom.reducedMotion = value; },
+});
+document.getElementById('openGarage')!.onclick = () => premiumGarage.open();
 function stopGarage() {
   cancelAnimationFrame(garageRaf);
   garageRaf = 0;

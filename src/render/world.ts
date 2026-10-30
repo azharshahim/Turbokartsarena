@@ -525,7 +525,7 @@ export class PhysicsEngine {
       model.body.position.y = st.hop + st.bounce * 0.12;
 
       // roues : rotation + braquage
-      vis.wheelSpin += (st.speed / 0.42) * dt;
+      vis.wheelSpin += (st.speed / (model.root.userData.wheelRadius ?? 0.42)) * dt;
       const steerAngle = damp(
         vis.steerVisual,
         st.steer * 0.5 + (st.drifting ? st.driftDir * 0.16 : 0),

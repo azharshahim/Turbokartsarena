@@ -175,6 +175,26 @@
       #hazardWarning:empty {display:none;}
       @media(max-width:650px) and (orientation:portrait){.garageLayout{grid-template-columns:1fr;gap:8px}.garageView{position:relative;top:0}#garageCanvas{height:210px}#menu .garageOptions{padding-bottom:24px}}
       @media(max-height:500px) and (orientation:landscape){#menu{padding-top:8px;gap:4px}#menu h1{font-size:24px}.garageLayout{gap:18px}#menu .hint{display:none}#menu .garageOptions{gap:5px}#menu .statRow{font-size:9px}#menu .pickSub{font-size:10px}#menu .tools .tool{padding:8px}}
+      #turboGarage[hidden]{display:none}
+      #turboGarage{position:fixed;inset:0;z-index:100;background:radial-gradient(ellipse at 30% 45%,#243c59,#080e1b 70%);color:#e4efff;padding:24px;overflow:auto}
+      #turboGarage header{display:flex;justify-content:space-between;align-items:center;gap:16px}
+      #turboGarage h2{font-size:clamp(20px,3vw,34px);letter-spacing:2px;margin:8px 0 20px}
+      #turboGarage small{color:#67d9eb;letter-spacing:3px}
+      #turboGarage button{background:#17263c;color:#e4efff;border:1px solid #3b5772;border-radius:10px;padding:12px;cursor:pointer}
+      #turboGarage button:disabled{opacity:.4;cursor:default}
+      #turboGarage button[aria-pressed=true]{border-color:#64e5ff;background:#254b61}
+      #turboGarage nav{display:flex;gap:10px;margin-bottom:16px}
+      .premiumGrid{display:grid;grid-template-columns:1.4fr 1fr;gap:24px}
+      #premiumStage{border:1px solid #34516c;border-radius:24px;background:linear-gradient(150deg,#192c43aa,#080f1bcc);align-self:start}
+      #premiumStage #garageCanvas{height:clamp(260px,60vh,650px)}
+      #premiumBalance{color:#ffda68;font-weight:bold}
+      #premiumName{font-size:28px;margin:14px 0}
+      #premiumStats{line-height:1.8;color:#b1cee4;margin-bottom:16px}
+      #premiumList{display:grid;gap:8px;margin-top:12px}
+      #premiumList button{text-align:left}
+      #premiumFeedback{color:#80ffce;min-height:20px}
+      #turboGarage footer{font-size:13px;color:#b1cee4;padding:18px 0;display:flex;gap:20px;flex-wrap:wrap}
+      @media(max-width:650px) and (orientation:portrait){.premiumGrid{grid-template-columns:1fr}#turboGarage{padding:16px}#turboGarage nav button{font-size:11px;padding:10px}}
     </style>
   </head>
   <body>
@@ -246,7 +266,8 @@
     <div class="overlay" id="menu">
       <div class="glow"></div>
       <h1>TURBO<em> KARTS</em></h1>
-      <div class="sub">A R E N A · 3.0</div>
+      <div class="sub">A R E N A · V4 EN DÉVELOPPEMENT</div>
+      <button class="tool" id="openGarage">GARAGE TURBO KARTS</button>
       <div class="garageLayout">
         <div class="garageView"><canvas id="garageCanvas" aria-label="Aperçu 3D du pilote et du véhicule sélectionnés"></canvas><div id="garageLabel"></div></div>
         <div class="garageOptions">

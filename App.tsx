@@ -17,6 +17,7 @@ import { GLView } from 'expo-gl';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
+  Modal,
   AppState,
   Easing,
   Platform,
@@ -621,6 +622,7 @@ export default function App() {
 const NativeGarage: React.FC<{ profile: KartProfile }> = ({ profile }) => {
   const showroom = useRef<Showroom | null>(null);
   const raf = useRef<number>(0);
+  const gesture = useRef({ x: 0, distance: 0 });
   useEffect(() => {
     showroom.current?.select(profile);
   }, [profile.id, profile.vehicleId]);
@@ -634,7 +636,23 @@ const NativeGarage: React.FC<{ profile: KartProfile }> = ({ profile }) => {
   );
   return (
     <GLView
-      style={{ width: 320, height: 190 }}
+      style={{ width: '100%', height: 260 }}
+      onTouchStart={e => {
+        const t = e.nativeEvent.touches;
+        gesture.current = { x: t[0]?.pageX ?? 0, distance: t.length === 2 ? Math.hypot(t[0].pageX - t[1].pageX, t[0].pageY - t[1].pageY) : 0 };
+      }}
+      onTouchMove={e => {
+        const t = e.nativeEvent.touches;
+        if (t.length === 2) {
+          const distance = Math.hypot(t[0].pageX - t[1].pageX, t[0].pageY - t[1].pageY);
+          if (gesture.current.distance) showroom.current?.zoom((gesture.current.distance - distance) * 0.015);
+          gesture.current.distance = distance;
+        } else if (t.length === 1) {
+          if (!gesture.current.distance) showroom.current?.rotate((t[0].pageX - gesture.current.x) * 0.012);
+          gesture.current.distance = 0;
+        }
+        gesture.current.x = t[0]?.pageX ?? 0;
+      }}
       onContextCreate={(gl: any) => {
         showroom.current = new Showroom(null, profile, gl);
         const frame = (time: number) => {
@@ -668,6 +686,10 @@ const MenuScreen: React.FC<{
   const upLevel = garage.upgrades[vehicle.id]?.[upKind] ?? 0;
   const { width } = useWindowDimensions();
   const [showSettings, setShowSettings] = useState(false);
+  const [garageOpen, setGarageOpen] = useState(false);
+  const [garageTab, setGarageTab] = useState(0);
+  const [garageMessage, setGarageMessage] = useState('');
+
 
   const statBar = (label: string, value: number) => (
     <View style={styles.statRow} key={label}>
@@ -686,7 +708,39 @@ const MenuScreen: React.FC<{
       ]}
       style={{ flex: 1 }}
     >
-      <NativeGarage profile={profile} />
+      <TouchableOpacity accessibilityRole="button" style={styles.toolButton} onPress={() => setGarageOpen(true)}><Text style={styles.toolText}>GARAGE TURBO KARTS</Text></TouchableOpacity>
+      <Modal visible={garageOpen} animationType="fade" onRequestClose={() => setGarageOpen(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#0b1426' }}>
+          <ScrollView contentContainerStyle={{ padding: 20, gap: 14 }}>
+            <Text style={{ color: '#e4efff', fontSize: 26, fontWeight: '900' }}>GARAGE TURBO KARTS</Text>
+            <TouchableOpacity style={styles.toolButton} onPress={() => setGarageOpen(false)}><Text style={styles.toolText}>Retour au menu</Text></TouchableOpacity>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {['MES VÉHICULES', 'BOUTIQUE', 'AMÉLIORATIONS'].map((label, i) => <TouchableOpacity key={label} accessibilityState={{ selected: garageTab === i }} style={[styles.toolButton, { borderColor: garageTab === i ? '#64e5ff' : '#34516c' }]} onPress={() => setGarageTab(i)}><Text style={styles.toolText}>{label}</Text></TouchableOpacity>)}
+            </View>
+            {garageOpen && <NativeGarage profile={profile} />}
+            <Text style={{ color: '#ffd866', fontSize: 18 }}>{garage.coins} Turbo Coins · {vehicle.price ?? 0} TC</Text>
+            <Text style={{ color: 'white', fontSize: 22 }}>{vehicle.name}</Text>
+            <Text style={{ color: '#b1cee4' }}>{vehicle.description}</Text>
+            <Text style={{ color: '#b1cee4' }}>Vitesse ×{profile.speed.toFixed(2)} · Accélération ×{profile.accel.toFixed(2)} · Adhérence ×{profile.grip.toFixed(2)} · Freinage ×{(profile.brake ?? 1).toFixed(2)}</Text>
+            <TouchableOpacity disabled={!owned && garage.coins < (vehicle.price ?? 0)} style={styles.toolButton} onPress={() => {
+              const ng = { ...garage, owned: [...garage.owned] };
+              if (!owned && !buyVehicle(ng, vehicle.id, vehicle.price ?? 0).ok) return;
+              ng.selected = vehicle.id; onGarageChange(ng);
+              setGarageMessage(owned ? `${vehicle.name} prêt pour la course` : `${vehicle.name} débloqué !`);
+            }}><Text style={styles.toolText}>{owned ? 'Sélectionner pour la course' : `Acheter — ${vehicle.price ?? 0} TC`}</Text></TouchableOpacity>
+            <Text accessibilityLiveRegion="polite" style={{ color: '#80ffce' }}>{garageMessage}</Text>
+            {garageTab === 2 ? UPGRADE_KINDS.map(kind => {
+              const level = garage.upgrades[vehicle.id]?.[kind] ?? 0, cost = upgradeCost(kind, level);
+              return <TouchableOpacity key={kind} style={styles.toolButton} disabled={!owned || level >= 5 || garage.coins < cost} onPress={() => {
+                const ng = { ...garage, upgrades: { ...garage.upgrades, [vehicle.id]: { ...garage.upgrades[vehicle.id] } } };
+                if (buyUpgrade(ng, vehicle.id, kind).ok) onGarageChange(ng);
+              }}><Text style={styles.toolText}>{UP_LABEL[kind]} · {level}/5 · ×{(1 + level * 0.03).toFixed(2)} {level >= 5 ? 'MAX' : `→ ×${(1 + (level + 1) * 0.03).toFixed(2)} · ${cost} TC`}</Text></TouchableOpacity>;
+            }) : VEHICLES.map((v, i) => garage.owned.includes(v.id) === (garageTab === 0) && <TouchableOpacity key={v.id} style={styles.toolButton} onPress={() => { setSettings({ ...settings, vehicle: i }); setGarageMessage(''); }}><Text style={styles.toolText}>{v.name} · {v.price ?? 0} TC · V {v.speed.toFixed(2)} / A {v.accel.toFixed(2)} / G {v.grip.toFixed(2)}</Text></TouchableOpacity>)}
+            <Text style={{ color: '#b1cee4' }}>Glisser : rotation 360° · Pincer : zoom</Text>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+      {!garageOpen && <NativeGarage profile={profile} />}
       <View style={styles.menuGlow} />
       <Text style={styles.logo}>
         TURBO<Text style={styles.logoAccent}> KARTS</Text>

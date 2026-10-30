@@ -16,21 +16,54 @@ export class Showroom {
   private dragging = false;
   private lastX = 0;
   private lastTime = 0;
-  private onDown = (e: PointerEvent) => { this.dragging = true; this.lastX = e.clientX; this.canvas?.setPointerCapture(e.pointerId); };
-  private onMove = (e: PointerEvent) => { if (this.dragging) { this.angle += (e.clientX - this.lastX) * 0.012; this.lastX = e.clientX; } };
-  private onUp = () => { this.dragging = false; };
+  private pointers = new Map<number, { x: number; y: number }>();
+  private pinchDistance = 0;
+  reducedMotion = false;
+  rotate(delta: number) { this.angle += delta; }
+  private distance() {
+    const p = [...this.pointers.values()];
+    return p.length === 2 ? Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) : 0;
+  }
+  private onDown = (e: PointerEvent) => {
+    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    this.dragging = true; this.lastX = e.clientX;
+    this.pinchDistance = this.distance();
+    this.canvas?.setPointerCapture(e.pointerId);
+  };
+  private onMove = (e: PointerEvent) => {
+    if (!this.pointers.has(e.pointerId)) return;
+    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (this.pointers.size === 2) {
+      const distance = this.distance();
+      this.zoom((this.pinchDistance - distance) * 0.015);
+      this.pinchDistance = distance;
+    } else if (this.pointers.size === 1) this.rotate((e.clientX - this.lastX) * 0.012);
+    this.lastX = e.clientX;
+  };
+  private onUp = (e: PointerEvent) => {
+    this.pointers.delete(e.pointerId);
+    this.dragging = this.pointers.size > 0;
+    this.pinchDistance = this.distance();
+    const remaining = [...this.pointers.values()][0];
+    if (remaining) this.lastX = remaining.x;
+  };
   private onWheel = (e: WheelEvent) => { e.preventDefault(); this.zoom(e.deltaY * 0.003); };
-  zoom(amount: number) { this.camera.position.setLength(T.MathUtils.clamp(this.camera.position.length() + amount, 3.5, 9)); }
+  zoom(amount: number) {
+    this.camera.position.setLength(T.MathUtils.clamp(this.camera.position.length() + amount, 3.5, 9));
+    this.camera.lookAt(0, 0.75, 0);
+  }
 
   constructor(canvas: HTMLCanvasElement | null, profile: KartProfile, gl?: any) {
     this.native = !!gl;
     this.canvas = canvas;
     if (canvas) {
-      canvas.style.touchAction = 'pan-y';
+      canvas.style.touchAction = 'none';
+      this.reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
       canvas.addEventListener('pointerdown', this.onDown);
       canvas.addEventListener('pointermove', this.onMove);
       canvas.addEventListener('pointerup', this.onUp);
       canvas.addEventListener('pointercancel', this.onUp);
+      canvas.addEventListener('lostpointercapture', this.onUp);
       canvas.addEventListener('wheel', this.onWheel, { passive: false });
     }
     this.renderer = new T.WebGLRenderer({
@@ -53,24 +86,30 @@ export class Showroom {
     this.scene.add(rim);
     this.floor = new T.Mesh(
       new T.CylinderGeometry(2, 2.15, 0.1, 48),
-      new T.MeshStandardMaterial({ color: 0x26344a, metalness: 0.5, roughness: 0.4 }),
+      new T.MeshStandardMaterial({ color: 0x26344a, metalness: 0.5, roughness: 0.18 }),
     );
     this.floor.position.y = -0.09;
     this.scene.add(this.floor);
-    this.model = createVehicle(profile, QUALITY.high);
+    // Raised luminous turntable edge; reusable geometry disposed with the stage.
+    const ring = new T.Mesh(new T.TorusGeometry(2.03, 0.025, 6, 64),
+      new T.MeshStandardMaterial({ color: 0x64e5ff, emissive: 0x278eae, emissiveIntensity: 2 }));
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.03;
+    this.floor.add(ring);
+    this.model = createVehicle(profile, QUALITY.ultra);
     this.scene.add(this.model.root);
   }
   select(profile: KartProfile) {
     this.scene.remove(this.model.root);
     this.model.dispose();
-    this.model = createVehicle(profile, QUALITY.high);
+    this.model = createVehicle(profile, QUALITY.ultra);
     this.scene.add(this.model.root);
   }
   frame(time: number, width: number, height: number) {
     this.renderer.setSize(Math.max(1, width), Math.max(1, height), false);
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
-    if (this.lastTime && !this.dragging) this.angle += Math.min(0.05, (time - this.lastTime) / 1000) * 0.35;
+    if (this.lastTime && !this.dragging && !this.reducedMotion) this.angle += Math.min(0.05, (time - this.lastTime) / 1000) * 0.35;
     this.lastTime = time;
     this.model.root.rotation.y = this.angle;
     this.renderer.render(this.scene, this.camera);
@@ -83,9 +122,17 @@ export class Showroom {
       this.canvas.removeEventListener('pointermove', this.onMove);
       this.canvas.removeEventListener('pointerup', this.onUp);
       this.canvas.removeEventListener('pointercancel', this.onUp);
+      this.canvas.removeEventListener('lostpointercapture', this.onUp);
       this.canvas.removeEventListener('wheel', this.onWheel);
     }
     this.model.dispose();
+    this.floor.traverse(o => {
+      if (o instanceof T.Mesh && o !== this.floor) {
+        o.geometry.dispose();
+        (o.material as T.Material).dispose();
+      }
+    });
+    this.pointers.clear();
     this.floor.geometry.dispose();
     (this.floor.material as T.Material).dispose();
     this.renderer.dispose();
