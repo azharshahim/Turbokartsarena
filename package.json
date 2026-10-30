@@ -1,6 +1,6 @@
 {
   "name": "turbo-karts-arena",
-  "version": "3.0.0-dev",
+  "version": "4.1.0-dev",
   "private": true,
   "main": "index.js",
   "scripts": {
@@ -21,7 +21,9 @@
     "test:browser:android": "node tools/browser-android-startup.mjs",
     "test:browser:narrowing": "node tools/browser-narrowing.mjs",
     "test:browser:gpu": "node tools/browser-gpu-stability.mjs",
-    "test:mission10": "esbuild tools/tests-mission10.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/tests-mission10.mjs --log-level=error && node node_modules/.cache/tests-mission10.mjs"
+    "test:mission10": "esbuild tools/tests-mission10.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/tests-mission10.mjs --log-level=error && node node_modules/.cache/tests-mission10.mjs",
+    "test:mission11": "esbuild tools/tests-mission11.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/tests-mission11.mjs --log-level=error && node node_modules/.cache/tests-mission11.mjs",
+    "test:browser:mission11": "node tools/browser-mission11.mjs"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^1.24.0",

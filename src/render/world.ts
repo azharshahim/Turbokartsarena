@@ -96,7 +96,7 @@ export class PhysicsEngine {
   private sun: THREE.DirectionalLight;
   private fill: THREE.DirectionalLight;
   private hemi: THREE.HemisphereLight;
-  private input: DriveInput = { steer: 0, drift: false, brake: false, throttle: 1 };
+  private input: DriveInput = { steer: 0, drift: false, brake: false, throttle: 1, turbo: false };
 
   /* caméra / ressenti */
   private camPos = new THREE.Vector3();
@@ -394,6 +394,8 @@ export class PhysicsEngine {
     if (input.drift !== undefined) this.input.drift = input.drift;
     if (input.brake !== undefined) this.input.brake = input.brake;
     if (input.throttle !== undefined) this.input.throttle = clamp(input.throttle, 0, 1);
+    // V4.1 : bouton TURBO (libère le mini-turbo chargé pendant un dérapage).
+    if (input.turbo !== undefined) this.input.turbo = input.turbo;
   }
 
   get player() {
@@ -449,7 +451,7 @@ export class PhysicsEngine {
     this.finishedFired = false;
     this.lastTime = 0;
     this.shake = 0;
-    this.input = { steer: 0, drift: false, brake: false, throttle: 1 };
+    this.input = { steer: 0, drift: false, brake: false, throttle: 1, turbo: false };
     const p = this.race.player.state;
     this.camPos.set(p.x - Math.sin(p.heading) * 8, p.y + 4, p.z - Math.cos(p.heading) * 8);
     this.camYaw = p.heading;
@@ -893,6 +895,17 @@ export class PhysicsEngine {
       hazard: upcomingHazard(this.roadside.hazards, k.state.s, this.race.track.length, k.state.speed),
       drawCalls: this.renderer.info.render.calls,
       triangles: this.renderer.info.render.triangles,
+      /* V4.1 — état du bouton TURBO pour le HUD (aucun calcul GPU). */
+      turbo: {
+        ready: k.state.drifting && k.state.driftTier > 0,
+        active: k.isBoosting,
+        charge: k.driftChargeRatio,
+        tier: k.state.driftTier,
+        cooldown: k.state.boostCooldown,
+        mastery: k.state.masteryFlash > 0,
+        masteryCount: k.state.masteryCount,
+        boostTime: k.state.boostTime,
+      },
       fps: Math.round(1 / Math.max(1e-3, this.frameAvg)),
       pixelRatio: this.currentPixelRatio,
       particles: this.effects.all().reduce((a, p) => a + p.activeCount, 0),

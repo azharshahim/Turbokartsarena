@@ -5,8 +5,26 @@
  *  • index.html → copie déployable GitHub Pages de ce même bundle autonome.
  */
 import * as esbuild from 'esbuild';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+
+/**
+ * Commit Git utilisé pour ce build (V4.1).
+ * `TKA_GIT_COMMIT` permet de le fournir hors dépôt ; sinon on interroge git.
+ * Si aucun commit n'est disponible, on injecte une chaîne vide : le jeu affiche
+ * alors l'identifiant de secours explicite « sans-git » (jamais un faux hash).
+ */
+function resolveGitCommit() {
+  if (process.env.TKA_GIT_COMMIT) return process.env.TKA_GIT_COMMIT.trim();
+  try {
+    return execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return '';
+  }
+}
+const gitCommit = resolveGitCommit();
+if (!gitCommit) console.warn('⚠️  Commit Git indisponible : la version affichera « Build sans-git ».');
 
 mkdirSync('preview/dist', { recursive: true });
 mkdirSync('dist', { recursive: true });
@@ -20,6 +38,8 @@ const base = {
   logLevel: 'info',
   sourcemap: false,
   minify: true,
+  // Identification de version centralisée (`src/core/version.ts`).
+  define: { __TKA_GIT_COMMIT__: JSON.stringify(gitCommit) },
 };
 
 /* ---------- 1. build séparé (dev) ---------- */
@@ -51,6 +71,9 @@ const single = html
 writeFileSync('dist/turbo-karts-arena.html', single);
 writeFileSync('index.html', single);
 const kb = (single.length / 1024).toFixed(0);
+const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+const commitLabel = gitCommit ? `Build ${gitCommit}` : 'Build sans-git';
+console.log(`\n🏷️  Version ${pkg.version} · ${commitLabel}`);
 console.log(`\n✅ dist/turbo-karts-arena.html (${kb} Ko, autonome, hors ligne)`);
 console.log('✅ preview/dist/index.html (build de dev)');
 console.log('✅ index.html (bundle déployable GitHub Pages)');

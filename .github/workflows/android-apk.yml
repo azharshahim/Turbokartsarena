@@ -34,6 +34,8 @@ jobs:
       - run: npm run test:v2
       - run: npm run test:v3
       - run: npm run test:v4
+      - run: npm run test:mission10
+      - run: npm run test:mission11
       - run: npm run preview:build
       - name: Installer Chromium pour Playwright
         run: npx playwright install --with-deps chromium
@@ -49,6 +51,21 @@ jobs:
           BROWSER_TEST_URL=http://127.0.0.1:5173/index.html npm run test:browser
       - run: npm run test:browser:v2
       - run: npm run test:pwa
+      - name: Commandes V4.1 (paysage, gyroscope simulé, version)
+        run: |
+          node tools/serve-preview.mjs > /tmp/tka-preview-m11.log 2>&1 &
+          PREVIEW_PID=$!
+          trap 'kill "$PREVIEW_PID" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            curl --fail --silent http://127.0.0.1:5173/index.html > /dev/null && break
+            sleep 1
+          done
+          BROWSER_TEST_URL=http://127.0.0.1:5173/index.html npm run test:browser:mission11
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v41-captures
+          path: docs/v4.1-captures/
       - name: Chrome Android — démarrage, rotation et perte de contexte
         run: npm run test:browser:android
       - uses: actions/upload-artifact@v4

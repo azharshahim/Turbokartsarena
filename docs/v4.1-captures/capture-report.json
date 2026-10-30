@@ -1,0 +1,17 @@
+{
+  "viewport": {
+    "width": 915,
+    "height": 412,
+    "dpr": 2
+  },
+  "sensors": "simulés (DeviceOrientationEvent construits dans la page), aucun téléphone physique",
+  "version": "V4.1.0-dev · Build 2bd9c14",
+  "captures": [
+    "01-menu-commandes.png",
+    "01b-menu-commandes-bas.png",
+    "02-course-turbo-charge.png",
+    "03-course-hud.png",
+    "04-course-gyroscope.png"
+  ],
+  "domSize": 773601
+}

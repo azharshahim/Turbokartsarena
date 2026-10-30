@@ -1,10 +1,17 @@
 # Turbo Karts Arena
 
 Jeu de course de karts et de motos arcade 3D, **100 % original**, pour Android (Expo / React Native + three.js).
-Version 2.0 : huit circuits, douze pilotes, quatre karts, quatre motos et cinq adversaires IA.
+**Version fonctionnelle : `V4.1.0-dev` (développement, non publiée)** — douze circuits,
+quatorze véhicules (karts et motos), huit pilotes et cinq adversaires IA.
 Paysage, qualité graphique adaptative et PWA hors connexion. Les performances réelles dépendent de l’appareil.
 
-Voir [le dossier de revue V2](docs/V2.md) pour les nouveautés, les validations et la procédure Android.
+Dossiers de mission :
+
+- [Mission nº11 — commandes, gyroscope, HUD, version](docs/MISSION-11-V4.1.md)
+  et son [audit des commandes](docs/MISSION-11-AUDIT-COMMANDES.md) ;
+- [Mission nº10 — fausse alerte WebGL](docs/MISSION-10-FAUSSE-ALERTE-WEBGL.md) ;
+- [Mission nº9 — stabilité WebGL](docs/MISSION-9-WEBGL-STABILITY.md) ;
+- [Revue V2](docs/V2.md), [V3](docs/V3.md), [état V4](docs/V4-STATUS.md).
 
 > Ce dépôt contient **deux hôtes pour un seul moteur** :
 >
@@ -60,11 +67,13 @@ framebuffer, puis appelle `gl.endFrameEXP()` à chaque frame.
 
 | Action | Clavier (preview) | Tactile (Android) | Gyroscope |
 |---|---|---|---|
-| Accélérer | **automatique** | automatique | automatique |
-| Diriger | `←` `→` (ou `Q`/`D`) | boutons ‹ › | incliner l'appareil |
-| Dérapage | `Espace` / `Maj` | bouton DÉRAPAGE | — |
+| Accélérer | **automatique** (ou `↑` / `W` en mode manuel) | automatique — option **manuelle** avec le bouton GAZ | idem |
+| Diriger | `←` `→` (ou `Q`/`D`) | deux zones ‹ › à gauche | incliner l'appareil (3 sensibilités) |
+| Dérapage | `Espace` / `Maj` | bouton DÉRAPAGE (3 paliers, mini-turbo de maîtrise) | — |
+| Turbo | `E` | bouton TURBO (PRÊT / ACTIF / recharge) | — |
 | Freiner / marche arrière | `↓` (ou `S`) | bouton FREIN | — |
-| Pause | `P` / `Échap` | bouton ⏸ | — |
+| Recalibrer le volant | — | menu / pause → RECALIBRER | RECALIBRER |
+| Pause | `P` / `Échap` | bouton PAUSE | — |
 
 **Accélération automatique** : le kart accélère seul. En tactile paysage, le pouce gauche
 maintient GAUCHE/DROITE et le droit peut maintenir FREIN/DÉRAPAGE simultanément.
@@ -72,7 +81,12 @@ PAUSE suspend la simulation (et reprend sans réinitialiser chrono ou tour) ; `P
 `Échap` font la même chose sur clavier. Une perte de focus / un changement d'onglet
 met automatiquement la course en pause. En portrait sur le web, un rappel invite à
 tourner l'appareil. Le dérapage maintenu dans un virage charge la jauge
-<span>bleu → orange → violet</span>, puis son relâchement convertit la charge en turbo.
+<span>bleu → orange → violet</span> ; son relâchement convertit la charge en turbo, et le
+bouton TURBO permet de le déclencher à la demande. Tenir le palier violet au moins
+1,05 s avant de relâcher débloque un **mini-turbo de maîtrise** (+0,7 s, impulsion
+supplémentaire). Les réglages de commandes (mode, sensibilité, calibration, mode
+d'accélération) sont mémorisés séparément du garage, sous
+`turbokarts.v4.1.controls.v1`.
 
 ---
 
@@ -321,7 +335,9 @@ node tools/compress-astc.mjs         # 6×6, qualité 6 → assets/astc/ + manif
 npm test                 # tests moteur / géométrie / IA sur les huit circuits
 npm run test:v2          # matrice circuits/véhicules, physique moto, modèles et panneaux
 npm run test:browser     # scénarios Playwright pause, commandes, orientation et console
-npm run test:browser:v2  # garage, pilotes, huit véhicules/circuits et budget de rendu
+npm run test:mission10   # stabilité WebGL : perte de contexte et destructions ordonnées
+npm run test:mission11   # commandes V4.1 : zones, turbo, gyroscope, persistance, version
+npm run test:browser:mission11  # DOM réel : 7 zones tactiles, turbo, gyro simulé, captures
 npm run test:pwa         # installation, hors connexion et mises à jour du cache
 npm run typecheck        # vérifie les types React Native + preview
 npx expo export --platform android --output-dir /tmp/tka-android-export  # bundle Expo Android

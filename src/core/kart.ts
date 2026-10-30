@@ -26,6 +26,12 @@ export interface DriveInput {
   drift: boolean;
   /** 0..1 — l'accélération est automatique par défaut. */
   throttle: number;
+  /**
+   * V4.1 — bouton TURBO : libère immédiatement le mini-turbo chargé pendant un
+   * dérapage (la maîtrise est comptabilisée au relâchement). Optionnel : les
+   * appels existants restent valides.
+   */
+  turbo?: boolean;
 }
 
 export const NEUTRAL_INPUT: DriveInput = { steer: 0, brake: false, drift: false, throttle: 1 };
@@ -72,6 +78,14 @@ export interface KartState {
   driftTime: number;
   driftReleasedTime: number;
   driftSteerAccum: number;
+  /** Temps passé en palier violet pendant le dérapage courant (maîtrise). */
+  driftTier3Time: number;
+  /** Anti ré-amorçage après une libération au bouton TURBO. */
+  driftLockout: number;
+  /** Durée restante d'affichage « MAÎTRISE » dans le HUD. */
+  masteryFlash: number;
+  /** Nombre de mini-turbos de maîtrise réussis dans la course. */
+  masteryCount: number;
 
   /* turbo */
   boostTime: number;
@@ -142,6 +156,10 @@ function freshState(id: number, profile: KartProfile, isPlayer: boolean): KartSt
     driftTime: 0,
     driftReleasedTime: 0,
     driftSteerAccum: 0,
+    driftTier3Time: 0,
+    driftLockout: 0,
+    masteryFlash: 0,
+    masteryCount: 0,
     boostTime: 0,
     boostTier: 0,
     boostCooldown: 0,
@@ -233,6 +251,10 @@ export class Kart {
     st.driftDir = 0;
     st.driftCharge = 0;
     st.driftTier = 0;
+    st.driftTier3Time = 0;
+    st.driftLockout = 0;
+    st.masteryFlash = 0;
+    st.masteryCount = 0;
     st.boostTime = 0;
     st.boostPadTime = 0;
     st.boostTier = 0;
@@ -300,7 +322,16 @@ export class Kart {
     //   ⇒ h croissant = virage à GAUCHE.
     //   `input.steer` suit la convention écran : +1 = droite.
     //   `st.steer` est le braquage interne : +1 = gauche (lacet positif).
-    st.steer = damp(st.steer, -clamp(input.steer, -1, 1), input.drift ? 16 : 13, dt);
+    // V4.1 : le rappel au centre est plus rapide que la mise en virage — le
+    // pouce retrouve tout de suite la trajectoire, sans à-coup en entrée.
+    const steerTarget = -clamp(input.steer, -1, 1);
+    const steerRate =
+      Math.abs(steerTarget) < 1e-3
+        ? P.steerReturn
+        : input.drift
+          ? P.steerEngageDrift
+          : P.steerEngage;
+    st.steer = damp(st.steer, steerTarget, steerRate, dt);
     st.brakeAmount = damp(st.brakeAmount, input.brake ? 1 : 0, 18, dt);
 
     const steerMag = Math.abs(st.steer);
@@ -325,17 +356,23 @@ export class Kart {
     const speedFrac = Math.abs(st.speed) / maxSpeed;
 
     /* ---------- 3. dérapage : machine à états ---------- */
+    if (st.driftLockout > 0) st.driftLockout = Math.max(0, st.driftLockout - dt);
+    if (st.masteryFlash > 0) st.masteryFlash = Math.max(0, st.masteryFlash - dt);
+
     const canDrift = !st.airborne && Math.abs(st.speed) > PHYSICS.kart.driftEnterSpeed;
     const wantDrift = input.drift || (this.aiDriftHold && canDrift);
+    /** V4.1 : le bouton TURBO libère le mini-turbo sans lâcher le pouce du dérapage. */
+    const turboRelease = !!input.turbo && st.drifting && st.driftTier > 0;
 
     if (!st.drifting) {
-      if (wantDrift && canDrift && steerMag > D.enterSteerThreshold && st.brakeAmount < 0.4) {
+      if (wantDrift && canDrift && st.driftLockout <= 0 && steerMag > D.enterSteerThreshold && st.brakeAmount < 0.4) {
         st.drifting = true;
         st.driftDir = Math.sign(st.steer) || 1;
         st.driftCharge = 0;
         st.driftTier = 0;
         st.driftTime = 0;
         st.driftSteerAccum = 0;
+        st.driftTier3Time = 0;
         st.hop = 0.24;
         st.hopVel = 3.4;
         // petit coup de lacet pour "asseoir" le dérapage
@@ -355,14 +392,15 @@ export class Kart {
       st.driftTier = (
         st.driftCharge >= tiers[3] ? 3 : st.driftCharge >= tiers[2] ? 2 : st.driftCharge >= tiers[1] ? 1 : 0
       ) as DriftTier;
+      if (st.driftTier === 3) st.driftTier3Time += dt;
 
-      // fin du dérapage : frein, relâchement, ou marche arrière
+      // fin du dérapage : frein, relâchement, marche arrière ou bouton TURBO
       const released = !wantDrift && st.driftTime > 0.15;
       const braking = st.brakeAmount > 0.55;
       const tooSlow = Math.abs(st.speed) < 9;
       const reversed = Math.sign(st.speed) < 0 && Math.abs(st.speed) > 2;
-      if (released || braking || tooSlow || reversed) {
-        this.endDrift(track, raceTime);
+      if (released || braking || tooSlow || reversed || turboRelease) {
+        this.endDrift(track, raceTime, turboRelease);
       }
     }
     if (!st.drifting && st.driftReleasedTime > 0)
@@ -419,8 +457,8 @@ export class Kart {
       vf -= Math.sign(vf) * P.engineBrake * dt;
     }
 
-    // dérapage : léger grattage de vitesse
-    if (st.drifting) vf -= (1.9 + 1.6 * steerMag) * dt;
+    // dérapage : grattage de vitesse (V4.1 : plus doux, le dérapage conserve l'élan)
+    if (st.drifting) vf -= (D.scrubBase + D.scrubSteer * steerMag) * dt;
 
     // résistances
     vf -= Math.sign(vf) * P.rollingResistance * dt;
@@ -581,33 +619,60 @@ export class Kart {
     }
   }
 
-  /** Fin du dérapage : convertit la charge en turbo. */
-  private endDrift(track: Track, raceTime: number) {
+  /**
+   * Fin du dérapage : convertit la charge en turbo.
+   *
+   * V4.1 — récompense de maîtrise : un dérapage tenu en palier violet au-delà de
+   * `masteryHold` donne un mini-turbo renforcé (durée + impulsion), signalé au
+   * HUD. Le reste de la physique (paliers, plafond de vitesse) est inchangé.
+   *
+   * La sortie est stabilisée : une partie de la vitesse latérale est réalignée
+   * sur le cap, ce qui évite les tête-à-queue à la remise des gaz.
+   */
+  private endDrift(track: Track, raceTime: number, manual = false) {
     const st = this.state;
     const D = PHYSICS.drift;
     const tier = st.driftTier;
+    const mastered = tier >= 3 && st.driftTier3Time >= D.masteryHold;
     if (tier > 0 && st.driftTime > 0.28) {
-      const duration = D.boostDuration[tier];
+      const bonus = mastered ? D.masteryBonus : 0;
+      const duration = D.boostDuration[tier] + bonus;
       const add = tier === st.boostTier && st.boostTime > 0 ? duration * D.stackFactor : duration;
-      st.boostTime = Math.min(2.6, st.boostTime + add);
+      st.boostTime = Math.min(2.6 + D.masteryBonus, st.boostTime + add);
       st.boostTier = Math.max(st.boostTier, tier) as DriftTier;
       st.boostCooldown = 0.12;
       // impulsion immédiate : c'est ce qui rend le boost "satisfaisant"
-      const kick = 2.6 + tier * 2.2;
+      const kick = 2.6 + tier * 2.2 + (mastered ? D.masteryKick : 0);
       st.vx += Math.sin(st.heading) * kick;
       st.vz += Math.cos(st.heading) * kick;
       st.speed += kick;
       st.driftReleasedTime = 0.5;
-      void track;
-      void raceTime;
+      if (mastered) {
+        st.masteryCount += 1;
+        st.masteryFlash = 1.4;
+      }
     } else if (tier === 0) {
       st.boostTier = 0;
     }
+
+    // sortie de dérapage propre : on réaligne une partie de la vitesse latérale
+    const fx = Math.sin(st.heading);
+    const fz = Math.cos(st.heading);
+    const vf = st.vx * fx + st.vz * fz;
+    const vl = st.vx * fz - st.vz * fx;
+    const keep = D.exitLateralKeep;
+    st.vx = fx * vf + fz * vl * keep;
+    st.vz = fz * vf - fx * vl * keep;
+
     st.drifting = false;
     st.driftDir = 0;
     st.driftCharge = 0;
     st.driftTier = 0;
     st.driftTime = 0;
+    st.driftTier3Time = 0;
+    if (manual) st.driftLockout = D.reentryLockout;
+    void track;
+    void raceTime;
   }
 
   respawn(track: Track, raceTime: number) {
@@ -627,6 +692,8 @@ export class Kart {
     st.driftCharge = 0;
     st.driftTier = 0;
     st.driftDir = 0;
+    st.driftTier3Time = 0;
+    st.driftLockout = 0;
     st.offRoadTime = 0;
     st.stuckTime = 0;
     st.airborne = false;
