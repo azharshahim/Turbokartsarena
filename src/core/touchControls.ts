@@ -1,5 +1,11 @@
-/** État des commandes tactiles multi-doigts (Pointer Events & React Native). */
-export type TouchAction = 'left' | 'right' | 'drift' | 'brake' | 'fire';
+/**
+ * État des commandes tactiles multi-doigts (Pointer Events & React Native).
+ *
+ * V4.1 : `turbo` (libère le mini-turbo chargé) et `accel` (mode accélération
+ * manuelle) rejoignent la direction, le dérapage, le frein et le tir. Chaque
+ * action est indépendante : un pointeur = une action, jamais de conflit.
+ */
+export type TouchAction = 'left' | 'right' | 'drift' | 'brake' | 'fire' | 'turbo' | 'accel';
 export type TouchZoneId = TouchAction | 'pause';
 
 export interface TouchZoneRect {
@@ -62,6 +68,14 @@ export class MultiTouchControls {
 
   get brake() {
     return this.isDown('brake');
+  }
+
+  get turbo() {
+    return this.isDown('turbo');
+  }
+
+  get accel() {
+    return this.isDown('accel');
   }
 
   clear() {
@@ -191,6 +205,14 @@ export class TouchZoneController {
 
   get brake() {
     return this.controls.brake;
+  }
+
+  get turbo() {
+    return this.controls.turbo;
+  }
+
+  get accel() {
+    return this.controls.accel;
   }
 
   get activePointerCount() {

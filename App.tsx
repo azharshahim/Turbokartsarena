@@ -7,12 +7,13 @@
  *
  * Entrées :
  *  - Boutons tactiles (accélération automatique, boutons gauche/droite + dérapage)
- *  - Gyroscope (expo-sensors) calibré sur l'angle de repos
+ *  - Gyroscope (expo-sensors `DeviceMotion`) : orientation de l'appareil projetée
+ *    dans le référentiel de l'écran, avec zone morte, calibration et sensibilité
  *  - Manette Bluetooth (mappage clavier/gamepad via la preview web)
  */
 
 import { StatusBar } from 'expo-status-bar';
-import { Gyroscope } from 'expo-sensors';
+import { DeviceMotion } from 'expo-sensors';
 import { GLView } from 'expo-gl';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -44,6 +45,18 @@ import {
   type TouchZoneRect,
 } from './src/core/touchControls';
 import Icon from './src/ui/icons';
+import {
+  CONTROL_SETTINGS_KEY,
+  DEFAULT_CONTROL_SETTINGS,
+  nextSensitivity,
+  nextThrottleMode,
+  sanitizeControlSettings,
+  SENSITIVITY_LABEL,
+  THROTTLE_MODE_LABEL,
+  type ControlSettings,
+} from './src/core/controlSettings';
+import { GYRO_SIGNAL_TIMEOUT_MS, TiltSteering, normalizeScreenAngle, type ScreenAngle } from './src/core/gyro';
+import { versionBadge, versionDiagnostics } from './src/core/version';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { awardRace, buyUpgrade, buyVehicle, defaultGarage, loadGarage, upgradeCost, upgradedProfile, upgradeMultiplier, UPGRADE_KINDS, GARAGE_STORAGE_KEY, type GarageState, type UpgradeKind } from './src/game/economy';
 const UP_LABEL: Record<UpgradeKind, string> = { engine: 'Moteur', acceleration: 'Accélération', topSpeed: 'Vitesse max', braking: 'Freinage', grip: 'Adhérence', protection: 'Protection', turbo: 'Turbo' };
@@ -52,26 +65,43 @@ type Screen = 'menu' | 'race' | 'results';
 
 interface Settings {
   quality: QualityLevel | 'auto';
-  gyro: boolean;
   sound: boolean;
   reducedMotion: boolean;
   laps: number;
   vehicle: number;
   difficulty: Difficulty;
+  /** V4.1 — commandes persistées : mode, sensibilité, calibration, accélération. */
+  controls: ControlSettings;
 }
 
 const DEFAULT_SETTINGS: Settings = {
   quality: 'auto',
-  gyro: false,
   sound: false,
   reducedMotion: false,
   laps: 3,
   vehicle: 0,
   difficulty: 'arcade',
+  controls: { ...DEFAULT_CONTROL_SETTINGS },
 };
 
-type HeldButtons = { left: boolean; right: boolean; drift: boolean; brake: boolean; fire: boolean };
-const EMPTY_HELD: HeldButtons = { left: false, right: false, drift: false, brake: false, fire: false };
+type HeldButtons = {
+  left: boolean;
+  right: boolean;
+  drift: boolean;
+  brake: boolean;
+  fire: boolean;
+  turbo: boolean;
+  accel: boolean;
+};
+const EMPTY_HELD: HeldButtons = {
+  left: false,
+  right: false,
+  drift: false,
+  brake: false,
+  fire: false,
+  turbo: false,
+  accel: false,
+};
 
 function makeInitialHud(laps: number) {
   return {
@@ -89,6 +119,8 @@ function makeInitialHud(laps: number) {
     best: 0,
     results: null as null | { place: number; time: number; laps: number[] },
     weapon: null as string | null, shield: false, coins: 0, combatEvent: '', health: 100,
+    turbo: { ready: false, active: false, charge: 0, tier: 0, cooldown: 0, mastery: false, masteryCount: 0 },
+    gyroLive: false,
   };
 }
 
@@ -124,6 +156,28 @@ export default function App() {
   const raceIdRef = useRef('');
   useEffect(() => { AsyncStorage.getItem(GARAGE_STORAGE_KEY).then((raw) => { if (raw) setGarage(loadGarage({ getItem: () => raw, setItem: () => undefined })); }).catch(() => undefined); }, []);
   useEffect(() => { AsyncStorage.setItem(GARAGE_STORAGE_KEY, JSON.stringify(garage)).catch(() => undefined); }, [garage]);
+  /* V4.1 — réglages de commande : chargés une fois, réécrits à chaque changement. */
+  const controlsLoadedRef = useRef(false);
+  useEffect(() => {
+    AsyncStorage.getItem(CONTROL_SETTINGS_KEY)
+      .then((raw) => {
+        if (!raw) return;
+        try {
+          const parsed = sanitizeControlSettings(JSON.parse(raw));
+          setSettings((prev) => ({ ...prev, controls: parsed }));
+        } catch {
+          /* réglage corrompu : valeurs par défaut conservées */
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        controlsLoadedRef.current = true;
+      });
+  }, []);
+  useEffect(() => {
+    if (!controlsLoadedRef.current) return;
+    AsyncStorage.setItem(CONTROL_SETTINGS_KEY, JSON.stringify(settings.controls)).catch(() => undefined);
+  }, [settings.controls]);
   const [hud, setHud] = useState(() => makeInitialHud(DEFAULT_SETTINGS.laps));
 
   const engineRef = useRef<PhysicsEngine | null>(null);
@@ -135,7 +189,11 @@ export default function App() {
   const rafRef = useRef<number | null>(null);
   const frameLoopRef = useRef<((t: number) => void) | null>(null);
   const resultsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const gyroRef = useRef({ angle: 0, rest: 0, enabled: false });
+  /** V4.1 — volant virtuel (même module pur que la preview web). */
+  const tiltRef = useRef(new TiltSteering());
+  const gyroRef = useRef({ running: false, hasSample: false, lastAt: 0, beta: 0, gamma: 0, orientation: 0 });
+  const tiltFrameRef = useRef(0);
+  const [controlMessage, setControlMessage] = useState('');
   const hudTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   screenRef.current = screen;
@@ -150,6 +208,8 @@ export default function App() {
       drift: c.drift,
       brake: c.brake,
       fire: fireDown,
+      turbo: c.turbo,
+      accel: c.accel,
     };
     inputRef.current = next;
     setPressedButtons((prev) =>
@@ -157,7 +217,9 @@ export default function App() {
       prev.right === next.right &&
       prev.drift === next.drift &&
       prev.brake === next.brake &&
-      prev.fire === next.fire
+      prev.fire === next.fire &&
+      prev.turbo === next.turbo &&
+      prev.accel === next.accel
         ? prev
         : next,
     );
@@ -166,9 +228,15 @@ export default function App() {
   const clearHeldInputs = useCallback(() => {
     touchControllerRef.current.clear();
     inputRef.current = { ...EMPTY_HELD };
-    setPressedButtons((prev) => (prev.left || prev.right || prev.drift || prev.brake || prev.fire ? EMPTY_HELD : prev));
-    gyroRef.current.rest = gyroRef.current.angle;
-    engineRef.current?.setInput({ steer: 0, drift: false, brake: false, throttle: 1 });
+    setPressedButtons((prev) =>
+      prev.left || prev.right || prev.drift || prev.brake || prev.fire || prev.turbo || prev.accel
+        ? EMPTY_HELD
+        : prev,
+    );
+    // Le volant virtuel revient au centre sans perdre sa calibration.
+    tiltRef.current.reset();
+    tiltFrameRef.current = 0;
+    engineRef.current?.setInput({ steer: 0, drift: false, brake: false, throttle: 1, turbo: false });
   }, []);
 
   const stopFrameLoop = useCallback(() => {
@@ -268,28 +336,105 @@ export default function App() {
     startFrameLoop();
   }, [clearHeldInputs, scheduleResultsTransition, startFrameLoop]);
 
-  /* ---------------- gyroscope ---------------- */
+  /* ---------------- gyroscope (V4.1) ----------------
+     On lit l'ORIENTATION de l'appareil (DeviceMotion.rotation : alpha/beta/gamma),
+     jamais la vitesse angulaire du gyroscope : c'est la seule source qui permette
+     un volant stable, qui revient au centre quand le téléphone est immobile.
+     Le calcul d'inclinaison vit dans `src/core/gyro.ts` (le même que sur le web). */
+  const failGyro = useCallback(
+    (reason: string) => {
+      gyroRef.current.running = false;
+      gyroRef.current.hasSample = false;
+      tiltRef.current.reset();
+      setControlMessage(`Gyroscope indisponible (${reason}) — boutons tactiles réactivés.`);
+      setSettings((prev) => ({ ...prev, controls: { ...prev.controls, steerMode: 'buttons' } }));
+    },
+    [],
+  );
+
   useEffect(() => {
-    if (!settings.gyro) {
-      gyroRef.current.enabled = false;
+    const steerMode = settings.controls.steerMode;
+    const tilt = tiltRef.current;
+    tilt.sensitivity = settings.controls.sensitivity;
+    tilt.invertTilt = settings.controls.invertTilt;
+    tilt.setCalibration(settings.controls.calibration);
+    if (steerMode !== 'gyro') {
+      gyroRef.current.running = false;
+      gyroRef.current.hasSample = false;
       return;
     }
     let sub: { remove: () => void } | null = null;
-    Gyroscope.setUpdateInterval(16);
-    sub = Gyroscope.addListener(({ y, z }) => {
-      // Lacet ≈ intégration de la vitesse angulaire : on utilise la projection
-      // (y = tangage, z = roulis) pour un pilotage "inclinaison du téléphone".
-      const angle = Math.atan2(z, 9.81);
-      const g = gyroRef.current;
-      if (!g.enabled) {
-        g.rest = angle;
-        g.enabled = true;
+    let cancelled = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    (async () => {
+      try {
+        const available = await DeviceMotion.isAvailableAsync();
+        if (cancelled) return;
+        if (!available) {
+          failGyro('capteur absent');
+          return;
+        }
+        const permission = await DeviceMotion.requestPermissionsAsync?.();
+        if (cancelled) return;
+        if (permission && permission.status !== 'granted') {
+          failGyro('autorisation refusée');
+          return;
+        }
+        DeviceMotion.setUpdateInterval(16);
+        sub = DeviceMotion.addListener((measurement) => {
+          const rotation = measurement?.rotation;
+          if (!rotation || !Number.isFinite(rotation.beta) || !Number.isFinite(rotation.gamma)) return;
+          const g = gyroRef.current;
+          g.beta = (rotation.beta * 180) / Math.PI;
+          g.gamma = (rotation.gamma * 180) / Math.PI;
+          g.orientation = normalizeScreenAngle(Number((measurement as { orientation?: number }).orientation ?? 0));
+          g.lastAt = Date.now();
+          if (!g.hasSample) {
+            g.hasSample = true;
+            tilt.reset();
+            tilt.setCalibration(settings.controls.calibration);
+          }
+        });
+        gyroRef.current.running = true;
+        gyroRef.current.hasSample = false;
+        setControlMessage('Gyroscope en cours d’initialisation…');
+        timeout = setTimeout(() => {
+          timeout = null;
+          if (!gyroRef.current.hasSample) failGyro('aucune donnée reçue');
+          else setControlMessage('Gyroscope actif — inclinez le téléphone pour tourner.');
+        }, 1500);
+      } catch {
+        if (!cancelled) failGyro('capteur indisponible');
       }
-      g.angle = angle;
-      void y;
-    });
-    return () => sub?.remove();
-  }, [settings.gyro]);
+    })();
+    return () => {
+      cancelled = true;
+      if (timeout) clearTimeout(timeout);
+      sub?.remove();
+      gyroRef.current.running = false;
+    };
+  }, [settings.controls.steerMode, failGyro]);
+
+  /* Les réglages fins (sensibilité, sens, calibration) suivent sans réabonnement. */
+  useEffect(() => {
+    const tilt = tiltRef.current;
+    tilt.sensitivity = settings.controls.sensitivity;
+    tilt.invertTilt = settings.controls.invertTilt;
+    tilt.setCalibration(settings.controls.calibration);
+  }, [settings.controls.sensitivity, settings.controls.invertTilt, settings.controls.calibration]);
+
+  const calibrateGyro = useCallback(() => {
+    const g = gyroRef.current;
+    if (settings.controls.steerMode !== 'gyro' || !g.hasSample) {
+      setControlMessage('Activez d’abord le gyroscope, puis recalibrez en tenant le téléphone naturellement.');
+      return;
+    }
+    const tilt = tiltRef.current;
+    tilt.push(g.beta, g.gamma, g.orientation, 1 / 60, Date.now());
+    const degrees = Math.round(tilt.calibrate() * 10) / 10;
+    setSettings((prev) => ({ ...prev, controls: { ...prev.controls, calibration: degrees } }));
+    setControlMessage(`Position neutre enregistrée (${degrees.toFixed(0)}°).`);
+  }, [settings.controls.steerMode]);
 
   /* ---------------- boucle de HUD ---------------- */
   const startHudLoop = useCallback(() => {
@@ -320,6 +465,11 @@ export default function App() {
         best: p.state.bestLapTime,
         results: null,
         weapon: e.combatHud.weapon, shield: e.combatHud.shield, coins: e.combatHud.coins, combatEvent: e.combatHud.event, health: e.combatHud.health,
+        turbo: e.stats.turbo,
+        gyroLive: (() => {
+          const g = gyroRef.current;
+          return settings.controls.steerMode === 'gyro' && g.hasSample && Date.now() - g.lastAt <= GYRO_SIGNAL_TIMEOUT_MS;
+        })(),
       });
     }, 66);
   }, [settings.laps, scheduleResultsTransition]);
@@ -443,13 +593,21 @@ export default function App() {
           return;
         }
         const i = inputRef.current;
-        const g = gyroRef.current;
+        const ctrl = settings.controls;
         let steer = i.left === i.right ? 0 : i.left ? -1 : 1;
-        if (settings.gyro && g.enabled) {
-          const delta = g.angle - g.rest;
-          steer = Math.max(-1, Math.min(1, delta * 3.2));
+        if (ctrl.steerMode === 'gyro') {
+          const g = gyroRef.current;
+          const nowMs = Date.now();
+          // Le gyroscope ne dirige que s'il émet encore réellement des données.
+          if (g.hasSample && nowMs - g.lastAt <= GYRO_SIGNAL_TIMEOUT_MS) {
+            const dt = tiltFrameRef.current === 0 ? 1 / 60 : Math.max(1 / 240, Math.min(0.1, (t - tiltFrameRef.current) / 1000));
+            tiltFrameRef.current = t;
+            tiltRef.current.push(g.beta, g.gamma, g.orientation as ScreenAngle, dt, nowMs);
+            steer = tiltRef.current.steer;
+          }
         }
-        engine.setInput({ steer, drift: i.drift, brake: i.brake, throttle: 1 });
+        const throttle = ctrl.throttleMode === 'auto' ? 1 : i.accel ? 1 : 0;
+        engine.setInput({ steer, drift: i.drift, brake: i.brake, throttle, turbo: i.turbo });
         engine.frame(t);
         if (engineRef.current === engine && !pausedRef.current && screenRef.current === 'race') {
           if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
@@ -478,9 +636,17 @@ export default function App() {
     pausedRef.current = false;
     setPaused(false);
     setHud(makeInitialHud(settings.laps));
+    // Le joueur tient son téléphone en position de jeu : recalage du volant virtuel.
+    const g = gyroRef.current;
+    if (settings.controls.steerMode === 'gyro' && g.hasSample) {
+      const tilt = tiltRef.current;
+      tilt.push(g.beta, g.gamma, g.orientation as ScreenAngle, 1 / 60, Date.now());
+      const degrees = Math.round(tilt.calibrate() * 10) / 10;
+      setSettings((prev) => ({ ...prev, controls: { ...prev.controls, calibration: degrees } }));
+    }
     screenRef.current = 'race';
     setScreen('race');
-  }, [clearHeldInputs, settings.laps, stopFrameLoop, stopTimers]);
+  }, [clearHeldInputs, settings.controls.steerMode, settings.laps, stopFrameLoop, stopTimers]);
 
   const quitRace = useCallback(() => {
     raceSessionRef.current += 1;
@@ -562,6 +728,9 @@ export default function App() {
           garage={garage}
           onGarageChange={setGarage}
           onStart={startRace}
+          controlMessage={controlMessage}
+          gyroLive={settings.controls.steerMode === 'gyro' && gyroRef.current.hasSample}
+          onCalibrateGyro={calibrateGyro}
         />
       )}
 
@@ -579,7 +748,8 @@ export default function App() {
             pressed={pressedButtons}
             onZoneRect={setZoneRect}
             onPause={pauseRace}
-            gyro={settings.gyro}
+            gyro={settings.controls.steerMode === 'gyro' && hud.gyroLive}
+            manualThrottle={settings.controls.throttleMode === 'manual'}
             bike={VEHICLES[settings.vehicle].kind !== 'kart'}
             paused={paused}
           />
@@ -598,7 +768,42 @@ export default function App() {
               ⚠ {hud.warning}
             </Text>
           )}
-          {paused && <PauseMenu onResume={resumeRace} onRestart={restartCurrentRace} onMenu={quitRace} />}
+          {paused && (
+            <PauseMenu
+              onResume={resumeRace}
+              onRestart={restartCurrentRace}
+              onMenu={quitRace}
+              diagnostics={versionDiagnostics()}
+              gyroLabel={
+                settings.controls.steerMode === 'gyro'
+                  ? hud.gyroLive
+                    ? 'GYROSCOPE : ACTIVÉ'
+                    : 'GYROSCOPE : EN ATTENTE…'
+                  : 'GYROSCOPE : DÉSACTIVÉ'
+              }
+              onToggleGyro={() =>
+                setSettings({
+                  ...settings,
+                  controls: {
+                    ...settings.controls,
+                    steerMode: settings.controls.steerMode === 'gyro' ? 'buttons' : 'gyro',
+                  },
+                })
+              }
+              onCalibrateGyro={calibrateGyro}
+              throttleLabel={THROTTLE_MODE_LABEL[settings.controls.throttleMode]}
+              onToggleThrottle={() =>
+                setSettings({
+                  ...settings,
+                  controls: {
+                    ...settings.controls,
+                    throttleMode: nextThrottleMode(settings.controls.throttleMode),
+                  },
+                })
+              }
+              controlMessage={controlMessage}
+            />
+          )}
         </View>
       )}
 
@@ -688,7 +893,31 @@ const MenuScreen: React.FC<{
   garage: GarageState;
   onGarageChange: (g: GarageState) => void;
   onStart: () => void;
-}> = ({ circuitIndex, setCircuitIndex, profileIndex, setProfileIndex, settings, setSettings, garage, onGarageChange, onStart }) => {
+  controlMessage: string;
+  gyroLive: boolean;
+  onCalibrateGyro: () => void;
+}> = ({
+  circuitIndex,
+  setCircuitIndex,
+  profileIndex,
+  setProfileIndex,
+  settings,
+  setSettings,
+  garage,
+  onGarageChange,
+  onStart,
+  controlMessage,
+  gyroLive,
+  onCalibrateGyro,
+}) => {
+  const setControls = (patch: Partial<ControlSettings>) =>
+    setSettings({ ...settings, controls: { ...settings.controls, ...patch } });
+  const gyroLabel =
+    settings.controls.steerMode === 'gyro'
+      ? gyroLive
+        ? 'GYROSCOPE : ACTIVÉ'
+        : 'GYROSCOPE : EN ATTENTE…'
+      : 'GYROSCOPE : DÉSACTIVÉ';
   const circuit = CIRCUITS[circuitIndex];
   const driver = ROSTER[profileIndex];
   const vehicle = VEHICLES[settings.vehicle];
@@ -856,19 +1085,58 @@ const MenuScreen: React.FC<{
       <TouchableOpacity style={styles.toolButton} onPress={() => setSettings({ ...settings, reducedMotion: !settings.reducedMotion })}>
         <Text style={styles.toolText}>Animations : {settings.reducedMotion ? 'réduites' : 'complètes'}</Text>
       </TouchableOpacity>
+      {/* V4.1 — commandes : état réel, calibration, sensibilité, accélération */}
       <View style={styles.menuTools}>
         <TouchableOpacity
-          style={styles.toolButton}
-          onPress={() => setSettings({ ...settings, gyro: !settings.gyro })}
+          accessibilityRole="button"
+          accessibilityState={{ selected: settings.controls.steerMode === 'gyro' }}
+          style={[styles.toolButton, settings.controls.steerMode === 'gyro' && styles.toolButtonActive]}
+          onPress={() =>
+            setControls({ steerMode: settings.controls.steerMode === 'gyro' ? 'buttons' : 'gyro' })
+          }
         >
-          <Icon name={settings.gyro ? 'gyro' : 'touch'} size={20} color="#dbe4ff" />
-          <Text style={styles.toolText}>{settings.gyro ? 'Gyroscope' : 'Boutons'}</Text>
+          <Icon name={settings.controls.steerMode === 'gyro' ? 'gyro' : 'touch'} size={20} color="#dbe4ff" />
+          <Text style={styles.toolText}>{gyroLabel}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          accessibilityRole="button"
+          style={[styles.toolButton, settings.controls.steerMode !== 'gyro' && { opacity: 0.45 }]}
+          onPress={onCalibrateGyro}
+        >
+          <Icon name="refresh" size={18} color="#dbe4ff" />
+          <Text style={styles.toolText}>RECALIBRER</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.toolButton}
+          onPress={() => setControls({ sensitivity: nextSensitivity(settings.controls.sensitivity) })}
+        >
+          <Text style={styles.toolText}>{SENSITIVITY_LABEL[settings.controls.sensitivity]}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.toolButton}
+          onPress={() => setControls({ throttleMode: nextThrottleMode(settings.controls.throttleMode) })}
+        >
+          <Text style={styles.toolText}>{THROTTLE_MODE_LABEL[settings.controls.throttleMode]}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.toolButton}
+          onPress={() => setControls({ invertTilt: !settings.controls.invertTilt })}
+        >
+          <Text style={styles.toolText}>
+            SENS DU GYRO : {settings.controls.invertTilt ? 'INVERSÉ' : 'NORMAL'}
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.toolButton} onPress={() => setShowSettings(true)}>
           <Icon name="gear" size={20} color="#dbe4ff" />
           <Text style={styles.toolText}>Réglages</Text>
         </TouchableOpacity>
       </View>
+      {!!controlMessage && (
+        <Text accessibilityLiveRegion="polite" style={styles.controlMessage}>
+          {controlMessage}
+        </Text>
+      )}
+      <Text style={styles.versionBadge}>{versionBadge()}</Text>
 
       {showSettings && (
         <View style={styles.settingsPanel}>
@@ -991,15 +1259,29 @@ const HoldButton: React.FC<{
   );
 };
 
+/** V4.1 — cibles tactiles généreuses, jamais collées aux bords sûrs. */
+const PAD_SIZE = 96;
+const PAD_LEFT = 18;
+
 const TouchHud: React.FC<{
   hud: any;
   pressed: HeldButtons;
   onZoneRect: (id: TouchZoneId, rect: TouchZoneRect | null) => void;
   onPause: () => void;
+  /** Gyroscope réellement utilisable (données reçues), pas seulement demandé. */
   gyro: boolean;
+  manualThrottle: boolean;
   bike: boolean;
   paused: boolean;
-}> = ({ hud, pressed, onZoneRect, onPause, gyro, bike, paused }) => {
+}> = ({ hud, pressed, onZoneRect, onPause, gyro, manualThrottle, bike, paused }) => {
+  const turbo = hud.turbo ?? { ready: false, active: false, charge: 0, cooldown: 0, mastery: false, masteryCount: 0 };
+  const turboLabel = turbo.active
+    ? 'TURBO !'
+    : turbo.ready
+      ? `TURBO ${Math.round(turbo.charge * 100)}%`
+      : turbo.cooldown > 0
+        ? `RECHARGE ${turbo.cooldown.toFixed(1)}s`
+        : 'TURBO';
   const tierColors = ['#8ea2c8', '#40c8ff', '#ff9a2e', '#c65cff'];
   const [topOffset, setTopOffset] = useState({ x: 16, y: 16 });
   const [controlsOffset, setControlsOffset] = useState({ x: 0, y: 0 });
@@ -1070,10 +1352,13 @@ const TouchHud: React.FC<{
             <Text style={{ fontSize: 13, color: '#93a6cc' }}>/{hud.total}</Text>
           </Text>
         </View>
+        <View style={[styles.gyroChip, { marginLeft: 'auto' }, gyro && styles.gyroChipOn]} pointerEvents="none">
+          <View style={[styles.gyroDot, gyro && styles.gyroDotOn]} />
+          <Text style={[styles.gyroChipText, gyro && { color: '#4dffc8' }]}>{gyro ? 'GYRO' : 'BOUTONS'}</Text>
+        </View>
         <View
           ref={pauseBtnRef}
           collapsable={false}
-          style={{ marginLeft: 'auto' }}
           onLayout={(e) => {
             pauseLocalRef.current = e.nativeEvent.layout;
             updatePauseRect();
@@ -1111,6 +1396,24 @@ const TouchHud: React.FC<{
             }}
           />
         </View>
+        <Text
+          style={[
+            styles.turboChip,
+            turbo.ready && !turbo.active && { color: '#40c8ff' },
+            turbo.active && { color: '#e0a4ff' },
+            turbo.mastery && { color: '#ffe14d' },
+          ]}
+        >
+          {turbo.mastery
+            ? `MAÎTRISE ×${turbo.masteryCount}`
+            : turbo.active
+              ? 'TURBO ACTIF'
+              : turbo.ready
+                ? `TURBO PRÊT ${Math.round(turbo.charge * 100)}%`
+                : turbo.cooldown > 0
+                  ? `RECHARGE ${turbo.cooldown.toFixed(1)}s`
+                  : 'TURBO —'}
+        </Text>
         {hud.best > 0 && <Text style={styles.bestLap}>Meilleur : {formatLap(hud.best)}</Text>}
       </View>
 
@@ -1132,9 +1435,9 @@ const TouchHud: React.FC<{
                 parentOffset={controlsOffset}
                 onZoneRect={onZoneRect}
                 accessibilityLabel="Gauche"
-                style={[styles.padButton, { left: 18 }]}
+                style={[styles.padButton, { left: PAD_LEFT }]}
               >
-                <Icon name="chevronLeft" size={38} color="#fff" />
+                <Icon name="chevronLeft" size={40} color="#fff" />
               </HoldButton>
               <HoldButton
                 zoneId="right"
@@ -1142,23 +1445,55 @@ const TouchHud: React.FC<{
                 parentOffset={controlsOffset}
                 onZoneRect={onZoneRect}
                 accessibilityLabel="Droite"
-                style={[styles.padButton, { left: 126 }]}
+                style={[styles.padButton, { left: PAD_LEFT + PAD_SIZE + 14 }]}
               >
-                <Icon name="chevronRight" size={38} color="#fff" />
+                <Icon name="chevronRight" size={40} color="#fff" />
               </HoldButton>
             </>
           )}
           <View style={{ flex: 1 }} pointerEvents="none" />
+          {manualThrottle && (
+            <HoldButton
+              zoneId="accel"
+              pressed={pressed.accel}
+              parentOffset={controlsOffset}
+              onZoneRect={onZoneRect}
+              accessibilityLabel="Accélérer"
+              style={[styles.actionButton, styles.accelButton]}
+            >
+              <Text style={styles.actionText}>GAZ</Text>
+            </HoldButton>
+          )}
           <HoldButton
             zoneId="fire"
             pressed={pressed.fire}
             parentOffset={controlsOffset}
             onZoneRect={onZoneRect}
             accessibilityLabel="Tirer"
-            style={[styles.actionButton, { backgroundColor: hud.weapon ? '#ff9a2ecc' : '#3a4358cc' }]}
+            style={[styles.actionButton, styles.fireButton, { opacity: hud.weapon ? 1 : 0.75 }]}
           >
-            <Text style={{ fontSize: 22 }}>🎯</Text>
+            <Text style={{ fontSize: 20 }}>🎯</Text>
             <Text style={styles.actionText}>{hud.weapon ? 'TIR' : 'TIR —'}</Text>
+          </HoldButton>
+          <HoldButton
+            zoneId="turbo"
+            pressed={pressed.turbo}
+            parentOffset={controlsOffset}
+            onZoneRect={onZoneRect}
+            accessibilityLabel="Turbo"
+            style={[
+              styles.actionButton,
+              turbo.active
+                ? styles.turboButtonActive
+                : turbo.ready
+                  ? styles.turboButtonReady
+                  : styles.turboButtonIdle,
+            ]}
+          >
+            <Icon name="bolt" size={24} color={turbo.ready || turbo.active ? '#fff' : '#8ea2c8'} />
+            <Text style={[styles.actionText, !turbo.ready && !turbo.active && { color: '#8ea2c8' }]}>
+              {turboLabel}
+            </Text>
           </HoldButton>
           <HoldButton
             zoneId="brake"
@@ -1166,7 +1501,7 @@ const TouchHud: React.FC<{
             parentOffset={controlsOffset}
             onZoneRect={onZoneRect}
             accessibilityLabel="Frein"
-            style={[styles.actionButton, { backgroundColor: '#ff3d6ecc' }]}
+            style={[styles.actionButton, styles.brakeButton]}
           >
             <Icon name="shield" size={22} color="#fff" />
             <Text style={styles.actionText}>FREIN</Text>
@@ -1195,10 +1530,28 @@ const TouchHud: React.FC<{
   );
 };
 
-const PauseMenu: React.FC<{ onResume: () => void; onRestart: () => void; onMenu: () => void }> = ({
+const PauseMenu: React.FC<{
+  onResume: () => void;
+  onRestart: () => void;
+  onMenu: () => void;
+  diagnostics: string;
+  gyroLabel: string;
+  onToggleGyro: () => void;
+  onCalibrateGyro: () => void;
+  throttleLabel: string;
+  onToggleThrottle: () => void;
+  controlMessage: string;
+}> = ({
   onResume,
   onRestart,
   onMenu,
+  diagnostics,
+  gyroLabel,
+  onToggleGyro,
+  onCalibrateGyro,
+  throttleLabel,
+  onToggleThrottle,
+  controlMessage,
 }) => (
   <View style={styles.pauseOverlay} accessibilityViewIsModal>
     <Text style={styles.pauseTitle}>PAUSE</Text>
@@ -1215,6 +1568,20 @@ const PauseMenu: React.FC<{ onResume: () => void; onRestart: () => void; onMenu:
     >
       <Text style={styles.pauseActionText}>MENU PRINCIPAL</Text>
     </TouchableOpacity>
+    {/* V4.1 — commandes accessibles en course : état réel, recalibrage, accélération */}
+    <View style={styles.pauseControls}>
+      <TouchableOpacity accessibilityRole="button" style={styles.chip} onPress={onToggleGyro}>
+        <Text style={styles.chipText}>{gyroLabel}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity accessibilityRole="button" style={styles.chip} onPress={onCalibrateGyro}>
+        <Text style={styles.chipText}>RECALIBRER</Text>
+      </TouchableOpacity>
+      <TouchableOpacity accessibilityRole="button" style={styles.chip} onPress={onToggleThrottle}>
+        <Text style={styles.chipText}>{throttleLabel}</Text>
+      </TouchableOpacity>
+    </View>
+    {!!controlMessage && <Text style={styles.controlMessage}>{controlMessage}</Text>}
+    <Text style={styles.versionBadge}>{diagnostics}</Text>
   </View>
 );
 
@@ -1382,11 +1749,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 12,
   },
-  speedo: { position: 'absolute', right: 24, bottom: 150, alignItems: 'flex-end' },
-  speedValue: { color: '#fff', fontWeight: '900', fontSize: 62, lineHeight: 64 },
+  speedo: { position: 'absolute', right: 20, bottom: 132, alignItems: 'flex-end' },
+  speedValue: { color: '#fff', fontWeight: '900', fontSize: 52, lineHeight: 54 },
   speedUnit: { color: '#8ea2c8', fontSize: 14, letterSpacing: 3, marginTop: -6 },
   driftMeter: {
-    width: 150,
+    width: 132,
     height: 10,
     borderRadius: 5,
     backgroundColor: '#0a1122cc',
@@ -1398,7 +1765,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 64,
+    bottom: 22,
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 18,
@@ -1407,9 +1774,9 @@ const styles = StyleSheet.create({
   padButton: {
     position: 'absolute',
     bottom: 0,
-    width: 96,
-    height: 96,
-    borderRadius: 48,
+    width: PAD_SIZE,
+    height: PAD_SIZE,
+    borderRadius: 28,
     backgroundColor: '#121a33cc',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1417,15 +1784,31 @@ const styles = StyleSheet.create({
     borderColor: '#2b3b5e',
   },
   actionButton: {
-    width: 104,
-    height: 104,
-    borderRadius: 52,
+    width: 88,
+    height: 88,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
+    gap: 3,
+    borderWidth: 1,
+    borderColor: '#ffffff22',
   },
-  driftButton: { backgroundColor: '#2b6bffcc' },
-  actionText: { color: '#fff', fontWeight: '800', fontSize: 11, letterSpacing: 1 },
+  driftButton: { backgroundColor: '#2b6bffdd' },
+  brakeButton: { backgroundColor: '#ff3d6eda' },
+  fireButton: { width: 64, height: 64, backgroundColor: '#ff9a2ee0' },
+  accelButton: { width: 88, height: 58, borderRadius: 16, backgroundColor: '#2ed688aa' },
+  turboButtonIdle: { backgroundColor: '#182036dd', borderColor: '#96a6d855' },
+  turboButtonReady: { backgroundColor: '#40c8ff4d', borderColor: '#40c8ff', borderWidth: 2 },
+  turboButtonActive: { backgroundColor: '#c65cff88', borderColor: '#e6b0ff', borderWidth: 2 },
+  turboChip: { color: '#6e82b0', fontSize: 10, fontWeight: '900', letterSpacing: 1.4, marginTop: 4 },
+  gyroChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8 },
+  gyroChipOn: {},
+  gyroDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#5f6f92' },
+  gyroDotOn: { backgroundColor: '#4dffc8' },
+  gyroChipText: { color: '#5f6f92', fontSize: 9, fontWeight: '900', letterSpacing: 1.2 },
+  controlMessage: { color: '#80ffce', fontSize: 12, textAlign: 'center', paddingHorizontal: 24 },
+  toolButtonActive: { borderWidth: 1, borderColor: '#40c8ff', backgroundColor: '#16244a' },
+  actionText: { color: '#fff', fontWeight: '800', fontSize: 10, letterSpacing: 1 },
   pauseOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 30,
@@ -1449,6 +1832,8 @@ const styles = StyleSheet.create({
     borderColor: '#344a7a',
   },
   pauseMenuAction: { backgroundColor: '#121a33' },
+  pauseControls: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginTop: 8 },
+  versionBadge: { color: '#46577e', fontSize: 10, letterSpacing: 1.6, fontWeight: '700', marginTop: 4 },
   pauseActionText: { color: '#eaf0ff', fontSize: 15, fontWeight: '900', letterSpacing: 1 },
   countdownOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   countdownText: { color: '#fff', fontSize: 140, fontWeight: '900' },

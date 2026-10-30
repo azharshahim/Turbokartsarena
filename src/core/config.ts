@@ -35,6 +35,10 @@ export const PHYSICS = {
     driftEnterSpeed: 13,
     /** Vitesse minimale pour "coller" le kart à la route (évite les tête-à-queue). */
     minMoveSpeed: 0.6,
+    /** Rappel au centre plus rapide que la mise en virage : précision au doigt. */
+    steerReturn: 17,
+    steerEngage: 13,
+    steerEngageDrift: 16,
   },
 
   /** 3 paliers de turbo — bleu / orange / violet. */
@@ -53,6 +57,24 @@ export const PHYSICS = {
     boostAccel: [0, 22, 30, 38] as const,
     /** Un boost fraîchement déclenché ne se cumule pas : il prolonge. */
     stackFactor: 0.85,
+    /**
+     * V4.1 — dérapage plus généreux : on conserve davantage de vitesse
+     * (grattage réduit) pour que le dérapage soit un outil de virage rapide
+     * et pas une punition.
+     */
+    scrubBase: 1.25,
+    scrubSteer: 0.95,
+    /**
+     * V4.1 — récompense de maîtrise : tenir le palier violet sans relâcher
+     * décroche un « mini-turbo » renforcé (durée + impulsion supplémentaires).
+     */
+    masteryHold: 1.05,
+    masteryBonus: 0.7,
+    masteryKick: 3.2,
+    /** Blocage court après un dérapage libéré au bouton TURBO (anti ré-amorçage). */
+    reentryLockout: 0.32,
+    /** Part de vitesse latérale conservée en sortie de dérapage (stabilité). */
+    exitLateralKeep: 0.45,
   },
 
   ai: {

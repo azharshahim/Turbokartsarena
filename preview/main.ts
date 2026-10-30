@@ -23,6 +23,19 @@ import { ROSTER } from '../src/game/roster';
 import { autoQuality, QUALITY, type QualityLevel } from '../src/core/config';
 import { formatLap, formatTime } from '../src/core/race';
 import { MultiTouchControls, type TouchAction } from '../src/core/touchControls';
+import {
+  loadControlSettings,
+  nextSensitivity,
+  nextSteerMode,
+  nextThrottleMode,
+  saveControlSettings,
+  SENSITIVITY_LABEL,
+  STEER_MODE_LABEL,
+  THROTTLE_MODE_LABEL,
+  type ControlSettings,
+} from '../src/core/controlSettings';
+import { GYRO_SIGNAL_TIMEOUT_MS, TiltSteering, readScreenAngle } from '../src/core/gyro';
+import { versionBadge, versionDiagnostics, versionInfo } from '../src/core/version';
 
 const boot = (window as any).__tkaBoot as {
   note: (phase: string, detail?: unknown) => void;
@@ -32,13 +45,16 @@ const boot = (window as any).__tkaBoot as {
 } | undefined;
 boot?.note('initialisation de l’interface');
 const $ = (id: string) => document.getElementById(id)!;
+/** Réglages de commande sauvegardés (localStorage, tolérant aux erreurs). */
+const persistControls = () => saveControlSettings(webStorage, state.controls);
 const state = {
   circuitIndex: 0,
   driverIndex: 0,
   vehicleIndex: 0,
   difficulty: 'arcade' as Difficulty,
   quality: 'auto' as QualityLevel | 'auto',
-  input: 'buttons' as 'buttons' | 'gyro',
+  /** V4.1 : commandes persistées (mode, sensibilité, calibration, accélération). */
+  controls: loadControlSettings(webStorage) as ControlSettings,
   laps: 3,
   showFps: false,
   reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
@@ -165,13 +181,30 @@ function refreshGarage() {
 
 let rafId = 0;
 const keys = new Set<string>();
-const touch = { steer: 0, drift: false, brake: false }; // synthetic input used by the capture harness
+const touch = { steer: 0, drift: false, brake: false, turbo: false, accel: false }; // entrée synthétique (harnais de test)
 const touchPointers = new MultiTouchControls();
 const pointerTargets = new Map<number, HTMLElement>();
 let startTimeout = 0;
 let finishTimeout = 0;
-let gyroBound = false;
-const gyro = { enabled: false, rest: 0, angle: 0, active: false };
+
+/* ---------- gyroscope (V4.1) ----------
+   On ne lit plus des vitesses angulaires : on lit l'ORIENTATION (beta/gamma),
+   projetée dans le référentiel de l'écran par `src/core/gyro.ts`. L'état affiché
+   est dérivé de la présence réelle d'échantillons, jamais de l'intention. */
+const tilt = new TiltSteering();
+const gyro = {
+  /** Écouteur posé et autorisation accordée. */
+  running: false,
+  /** Dernier échantillon reçu. */
+  beta: 0,
+  gamma: 0,
+  lastAt: 0,
+  hasSample: false,
+  /** Le capteur a déjà fonctionné pendant cette course (détection d'interruption). */
+  workedThisRace: false,
+};
+let gyroListener: ((event: DeviceOrientationEvent) => void) | null = null;
+let gyroDropoutWarned = false;
 
 function stopLoop() {
   if (rafId !== 0) {
@@ -266,20 +299,44 @@ function startEngine() {
     $('pause').classList.remove('hidden');
     const s = engine.stats;
     $('pauseStats').textContent =
-      `${s.fps} FPS · ${s.particles} particules · rendu ×${s.pixelRatio.toFixed(2)} · qualité ${engine.quality.level}`;
+      `${versionDiagnostics()} · ${s.fps} FPS · ${s.particles} particules · rendu ×${s.pixelRatio.toFixed(2)} · qualité ${engine.quality.level} · ` +
+      `commandes ${state.controls.steerMode === 'gyro' ? (gyroUsable() ? 'gyroscope' : 'gyroscope sans signal') : 'boutons'} · ` +
+      `sensibilité ${state.controls.sensitivity} · accélération ${state.controls.throttleMode}`;
+    renderMenu();
   } else {
     startLoop();
   }
 }
 
+let lastTiltPush = 0;
+/** Met à jour le volant virtuel avec le dernier échantillon du capteur. */
+function updateTilt(now: number) {
+  if (state.controls.steerMode !== 'gyro' || !gyro.running || !gyro.hasSample) return;
+  if (now - gyro.lastAt > GYRO_SIGNAL_TIMEOUT_MS) {
+    // Le capteur s'est tu en pleine course : retour immédiat aux boutons tactiles.
+    if (!gyroDropoutWarned) {
+      gyroDropoutWarned = true;
+      toast('Gyroscope interrompu — boutons tactiles réactivés', '#ff9a2e', 2200);
+    }
+    disableGyro(true);
+    return;
+  }
+  const dt = lastTiltPush === 0 ? 1 / 60 : Math.max(1 / 240, Math.min(0.1, (now - lastTiltPush) / 1000));
+  lastTiltPush = now;
+  tilt.push(gyro.beta, gyro.gamma, readScreenAngle(), dt, now);
+  gyro.workedThisRace = true;
+}
+
 function loop(t: number) {
   rafId = 0;
   if (!engine || state.paused || state.screen !== 'race' || engine.renderer.getContext().isContextLost()) return;
+  updateTilt(performance.now());
   engine.setInput({
     steer: currentSteer(),
     drift: currentDrift(),
     brake: currentBrake(),
-    throttle: 1,
+    throttle: currentThrottle(),
+    turbo: currentTurbo(),
   });
   try { engine.frame(t); } catch (error) { renderFailure(error, 'rendu de la course'); return; }
   if (!engine || state.paused || state.screen !== 'race' || engine.renderer.getContext().isContextLost()) return;
@@ -288,19 +345,28 @@ function loop(t: number) {
   rafId = requestAnimationFrame(loop);
 }
 
+/** Le gyroscope ne dirige que s'il produit réellement des données exploitables. */
+function gyroUsable(now = performance.now()) {
+  return state.controls.steerMode === 'gyro' && gyro.running && gyro.hasSample && now - gyro.lastAt <= GYRO_SIGNAL_TIMEOUT_MS;
+}
+
 function currentSteer() {
   let s = touchPointers.steer || touch.steer;
   const kLeft = keys.has('ArrowLeft') || keys.has('q') || keys.has('a');
   const kRight = keys.has('ArrowRight') || keys.has('d');
   if (kLeft !== kRight) s = kLeft ? -1 : 1;
   else if (kLeft && kRight) s = 0;
-  if (state.input === 'gyro' && gyro.active) {
-    s = Math.max(-1, Math.min(1, (gyro.angle - gyro.rest) * 3.2));
-  }
+  // Le volant virtuel prime sur les boutons, mais les boutons restent un repli
+  // immédiat dès que le capteur se tait (aucune course bloquée).
+  if (gyroUsable()) s = tilt.steer;
   return s;
 }
 const currentDrift = () => touchPointers.drift || touch.drift || keys.has(' ') || keys.has('Shift');
 const currentBrake = () => touchPointers.brake || touch.brake || keys.has('ArrowDown') || keys.has('s');
+const currentTurbo = () => touchPointers.isDown('turbo') || touch.turbo || keys.has('e');
+const currentAccel = () => touchPointers.isDown('accel') || touch.accel || keys.has('ArrowUp') || keys.has('w') || keys.has('z');
+/** Accélération automatique par défaut ; en manuel il faut tenir GAZ (ou ↑ / W). */
+const currentThrottle = () => (state.controls.throttleMode === 'auto' ? 1 : currentAccel() ? 1 : 0);
 
 /* ------------------------------------------------------------------ */
 /* HUD                                                                */
@@ -332,6 +398,37 @@ function updateHud() {
   fill.style.width = `${Math.max(tier > 0 ? 22 : 2, charge * 100)}%`;
   fill.style.backgroundColor = s.boosting ? '#c65cff' : colors[tier];
   fill.style.boxShadow = tier > 0 ? `0 0 16px ${colors[tier]}` : 'none';
+
+  /* ---------- état du bouton TURBO (disponible / actif / recharge) ---------- */
+  const turbo = s.turbo;
+  const turboBtn = $('turboBtn');
+  const turboLabel = $('turboLabel');
+  const turboChip = $('turboChip');
+  const cooldown = Math.max(0, turbo.cooldown);
+  const active = turbo.active;
+  const ready = turbo.ready;
+  turboBtn.classList.toggle('active', active);
+  turboBtn.classList.toggle('ready', ready && !active);
+  turboBtn.classList.toggle('cooling', !ready && !active && cooldown > 0);
+  turboBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  $('turboFill').style.transform = `scaleY(${active ? 1 : Math.max(0.04, turbo.charge).toFixed(3)})`;
+  turboLabel.textContent = active ? 'TURBO !' : ready ? `TURBO ${Math.round(turbo.charge * 100)}%` : cooldown > 0 ? `RECHARGE ${cooldown.toFixed(1)}s` : 'TURBO';
+  turboChip.className = turbo.mastery ? 'mastery' : active ? 'active' : ready ? 'ready' : '';
+  turboChip.textContent = turbo.mastery
+    ? `MAÎTRISE ×${turbo.masteryCount} · TURBO RENFORCÉ`
+    : active
+      ? 'TURBO ACTIF'
+      : ready
+        ? `TURBO PRÊT ${Math.round(turbo.charge * 100)}%`
+        : cooldown > 0
+          ? `RECHARGE ${cooldown.toFixed(1)}s`
+          : 'TURBO — dérapez pour charger';
+
+  /* ---------- indicateur gyroscope réel ---------- */
+  const gyroOn = gyroUsable(performance.now());
+  $('gyroChip').classList.toggle('on', gyroOn);
+  $('gyroChipText').textContent = gyroOn ? 'GYRO' : 'BOUTONS';
+  applyControlUi();
 
   hudAccum += 1;
   if (hudAccum % 6 === 0) {
@@ -415,6 +512,36 @@ function toast(text: string, color = '#fff', ms = 900) {
 /* Menus                                                              */
 /* ------------------------------------------------------------------ */
 
+/* Libellés des commandes : rendus à part pour être rafraîchis même en pause. */
+function renderControlLabels() {
+  /* V4.1 — commandes : l'état affiché décrit le fonctionnement réel. */
+  const gyroEnabled = state.controls.steerMode === 'gyro';
+  const gyroLive = gyroUsable();
+  const steerLabel = gyroEnabled
+    ? gyroLive
+      ? 'GYROSCOPE : ACTIVÉ'
+      : 'GYROSCOPE : EN ATTENTE…'
+    : 'GYROSCOPE : DÉSACTIVÉ';
+  for (const id of ['steerModeBtn', 'pauseGyroBtn']) {
+    const el = $(id);
+    el.textContent = steerLabel;
+    el.classList.toggle('on', gyroEnabled);
+    el.setAttribute('aria-pressed', gyroEnabled ? 'true' : 'false');
+  }
+  const calibrateDisabled = !gyroEnabled;
+  for (const id of ['calibrateBtn', 'pauseCalibrateBtn']) {
+    const el = $(id) as HTMLButtonElement;
+    el.disabled = calibrateDisabled;
+    el.style.opacity = calibrateDisabled ? '0.45' : '1';
+  }
+  $('sensitivityBtn').textContent = SENSITIVITY_LABEL[state.controls.sensitivity];
+  $('throttleModeBtn').textContent = THROTTLE_MODE_LABEL[state.controls.throttleMode];
+  $('pauseThrottleBtn').textContent = THROTTLE_MODE_LABEL[state.controls.throttleMode];
+  $('invertBtn').textContent = `SENS DU GYRO : ${state.controls.invertTilt ? 'INVERSÉ' : 'NORMAL'}`;
+  $('versionBadge').textContent = versionBadge();
+  applyControlUi();
+}
+
 function renderMenu() {
   $('motionToggle').textContent = `Animations : ${state.reducedMotion ? 'réduites' : 'complètes'}`;
   const c = CIRCUITS[state.circuitIndex];
@@ -453,10 +580,10 @@ function renderMenu() {
   $('qualityToggle').textContent =
     `⚙️ Qualité : ${state.quality === 'auto' ? 'Auto' : state.quality === 'low' ? 'Basse' : state.quality === 'high' ? 'Haute' : 'Ultra'}`;
   $('lapsToggle').textContent = `🏁 ${state.laps} tour${state.laps > 1 ? 's' : ''}`;
-  $('inputToggle').textContent = state.input === 'gyro' ? '📱 Gyroscope' : '⌨️ Boutons / clavier';
   $('fpsToggle').textContent = state.showFps ? '📊 FPS activé' : '📊 FPS';
   $('fpsBadge').classList.toggle('on', state.showFps);
-  document.body.classList.toggle('gyro-on', state.input === 'gyro');
+
+  renderControlLabels();
 }
 
 function showMenu() {
@@ -497,6 +624,20 @@ function startRace() {
   releaseRaceContext();
   engine?.dispose();
   engine = null;
+  // Le joueur tient son téléphone dans sa position de jeu : on recale le volant
+  // virtuel à cet instant (la calibration manuelle reste disponible via PAUSE).
+  if (state.controls.steerMode === 'gyro' && gyro.running) {
+    tilt.sensitivity = state.controls.sensitivity;
+    tilt.invertTilt = state.controls.invertTilt;
+    if (primeTilt()) {
+      tilt.reset();
+      const degrees = tilt.calibrate();
+      state.controls.calibration = Math.round(degrees * 10) / 10;
+      persistControls();
+    }
+  }
+  gyroDropoutWarned = false;
+  gyro.workedThisRace = false;
   state.screen = 'race';
   state.paused = false;
   document.body.classList.add('racing');
@@ -611,16 +752,14 @@ bind('lapsToggle', 'click', () => {
   state.laps = state.laps === 1 ? 3 : state.laps === 3 ? 5 : 1;
   renderMenu();
 });
-bind('inputToggle', 'click', async () => {
-  if (state.input === 'buttons') {
-    state.input = 'gyro';
-    await enableGyro();
-  } else {
-    state.input = 'buttons';
-    gyro.active = false;
-  }
-  renderMenu();
-});
+bind('steerModeBtn', 'click', () => void toggleSteerMode());
+bind('pauseGyroBtn', 'click', () => void toggleSteerMode());
+bind('calibrateBtn', 'click', () => calibrateGyro());
+bind('pauseCalibrateBtn', 'click', () => calibrateGyro());
+bind('sensitivityBtn', 'click', () => cycleSensitivity());
+bind('throttleModeBtn', 'click', () => cycleThrottleMode());
+bind('pauseThrottleBtn', 'click', () => cycleThrottleMode());
+bind('invertBtn', 'click', () => toggleInvertTilt());
 bind('fpsToggle', 'click', () => {
   state.showFps = !state.showFps;
   renderMenu();
@@ -684,9 +823,11 @@ function clearHeldInputs() {
   touch.steer = 0;
   touch.drift = false;
   touch.brake = false;
+  touch.turbo = false;
+  touch.accel = false;
   clearTouchPointers();
-  gyro.rest = gyro.angle;
-  engine?.setInput({ steer: 0, drift: false, brake: false, throttle: 1 });
+  resetTilt();
+  engine?.setInput({ steer: 0, drift: false, brake: false, throttle: 1, turbo: false });
 }
 
 /* commandes Pointer Events avec capture : plusieurs doigts restent indépendants */
@@ -720,14 +861,22 @@ const hold = (id: string, action: TouchAction) => {
 hold('leftBtn', 'left');
 hold('rightBtn', 'right');
 hold('driftBtn', 'drift');
-$('fireBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); engine?.firePlayerWeapon(); });
+hold('turboBtn', 'turbo');
 hold('brakeBtn', 'brake');
+hold('accelBtn', 'accel');
+$('fireBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); engine?.firePlayerWeapon(); });
 
 window.addEventListener('pointerup', (e) => releasePointerTarget(e.pointerId));
 window.addEventListener('pointercancel', (e) => releasePointerTarget(e.pointerId));
 window.addEventListener('touchcancel', () => {
   clearTouchPointers();
-  engine?.setInput({ steer: currentSteer(), drift: currentDrift(), brake: currentBrake(), throttle: 1 });
+  engine?.setInput({
+    steer: currentSteer(),
+    drift: currentDrift(),
+    brake: currentBrake(),
+    throttle: currentThrottle(),
+    turbo: false,
+  });
 });
 
 const normalizeKey = (k: string) => (k.length === 1 ? k.toLowerCase() : k);
@@ -766,32 +915,189 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-/* gyroscope */
-async function enableGyro() {
-  if (typeof (DeviceOrientationEvent as any)?.requestPermission === 'function') {
+/* ------------------------------------------------------------------ */
+/* Gyroscope : activation explicite, autorisation, calibration        */
+/* ------------------------------------------------------------------ */
+
+function attachGyroListener() {
+  if (gyroListener) return;
+  gyroListener = (event: DeviceOrientationEvent) => {
+    if (typeof event.beta !== 'number' || typeof event.gamma !== 'number') return;
+    if (!Number.isFinite(event.beta) || !Number.isFinite(event.gamma)) return;
+    gyro.beta = event.beta;
+    gyro.gamma = event.gamma;
+    gyro.lastAt = performance.now();
+    gyro.hasSample = true;
+  };
+  window.addEventListener('deviceorientation', gyroListener, true);
+}
+
+function detachGyroListener() {
+  if (!gyroListener) return;
+  window.removeEventListener('deviceorientation', gyroListener, true);
+  gyroListener = null;
+}
+
+/** Applique les classes d'interface qui reflètent l'état RÉEL des commandes. */
+let gyroClassOn = false;
+let manualClassOn = false;
+function applyControlUi() {
+  const gyroReal = gyroUsable();
+  if (gyroClassOn !== gyroReal) {
+    gyroClassOn = gyroReal;
+    document.body.classList.toggle('gyro-on', gyroReal);
+  }
+  const manual = state.controls.throttleMode === 'manual';
+  if (manualClassOn !== manual) {
+    manualClassOn = manual;
+    document.body.classList.toggle('manual-throttle', manual);
+  }
+}
+
+function waitForGyroSample(timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const started = performance.now();
+    const tick = () => {
+      if (gyro.hasSample) { resolve(true); return; }
+      if (performance.now() - started > timeoutMs) { resolve(false); return; }
+      window.setTimeout(tick, 60);
+    };
+    tick();
+  });
+}
+
+/** Un seul échantillon poussé hors course (menu, pause) : calibration fiable. */
+function primeTilt(now = performance.now()) {
+  if (!gyro.hasSample) return false;
+  tilt.push(gyro.beta, gyro.gamma, readScreenAngle(), 1 / 60, now);
+  return true;
+}
+
+function resetTilt() {
+  lastTiltPush = 0;
+  tilt.reset();
+}
+
+function gyroFailure(reason: string) {
+  gyro.hasSample = false;
+  gyro.running = false;
+  detachGyroListener();
+  state.controls.steerMode = 'buttons';
+  persistControls();
+  applyControlUi();
+  renderControlLabels();
+  resetTilt();
+  const secure = typeof window.isSecureContext === 'boolean' && !window.isSecureContext;
+  toast(
+    `Gyroscope indisponible (${reason}) — boutons tactiles réactivés${secure ? ' · HTTPS requis' : ''}`,
+    '#ff9a2e',
+    2800,
+  );
+  if (state.screen !== 'race') renderMenu();
+}
+
+/** Active le gyroscope : autorisation, attente de données réelles, puis calibration. */
+async function enableGyro(): Promise<boolean> {
+  if (typeof window.DeviceOrientationEvent === 'undefined') {
+    gyroFailure('capteur absent de ce navigateur');
+    return false;
+  }
+  const anyEvent = window.DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> };
+  if (typeof anyEvent.requestPermission === 'function') {
     try {
-      const perm = await (DeviceOrientationEvent as any).requestPermission();
-      if (perm !== 'granted') {
-        state.input = 'buttons';
-        toast('Gyroscope refusé', '#ff3d6e');
-        return;
+      const permission = await anyEvent.requestPermission();
+      if (permission !== 'granted') {
+        gyroFailure('autorisation refusée');
+        return false;
       }
     } catch {
-      state.input = 'buttons';
-      return;
+      gyroFailure('autorisation refusée');
+      return false;
     }
   }
-  if (!gyroBound) {
-    gyroBound = true;
-    window.addEventListener('deviceorientation', (ev) => {
-      if (ev.gamma === null) return;
-      gyro.angle = (((ev.gamma ?? 0) * Math.PI) / 180) * 1.6;
-      if (state.input === 'gyro') gyro.active = true;
-    });
+  attachGyroListener();
+  gyro.running = true;
+  gyro.hasSample = false;
+  tilt.sensitivity = state.controls.sensitivity;
+  tilt.invertTilt = state.controls.invertTilt;
+  const received = await waitForGyroSample(1500);
+  if (!received) {
+    gyroFailure('aucune donnée reçue');
+    return false;
   }
-  gyro.active = true;
-  gyro.rest = gyro.angle;
-  toast('Gyroscope : inclinez pour tourner', '#40c8ff', 1800);
+  gyroDropoutWarned = false;
+  gyro.workedThisRace = false;
+  primeTilt();
+  tilt.reset();
+  tilt.setCalibration(state.controls.calibration);
+  state.controls.steerMode = 'gyro';
+  persistControls();
+  applyControlUi();
+  renderControlLabels();
+  if (state.screen !== 'race') renderMenu();
+  toast('Gyroscope actif — inclinez le téléphone', '#40c8ff', 1800);
+  return true;
+}
+
+function disableGyro(fromFailure = false) {
+  gyro.hasSample = false;
+  gyro.running = false;
+  detachGyroListener();
+  resetTilt();
+  state.controls.steerMode = 'buttons';
+  persistControls();
+  applyControlUi();
+  renderControlLabels();
+  if (state.screen !== 'race') renderMenu();
+  if (!fromFailure) toast('Gyroscope désactivé — boutons tactiles', '#8ea2c8', 1600);
+}
+
+/** Bascule explicite « GYROSCOPE : ACTIVÉ / DÉSACTIVÉ ». */
+async function toggleSteerMode() {
+  if (state.controls.steerMode === 'gyro') {
+    disableGyro();
+    return;
+  }
+  await enableGyro();
+}
+
+/** Définit la position neutre en tenant le téléphone naturellement. */
+function calibrateGyro() {
+  if (state.controls.steerMode !== 'gyro' || !gyro.running || !gyro.hasSample) {
+    toast('Activez d’abord le gyroscope', '#ff9a2e', 1600);
+    return;
+  }
+  primeTilt();
+  const degrees = tilt.calibrate();
+  state.controls.calibration = Math.round(degrees * 10) / 10;
+  persistControls();
+  renderControlLabels();
+  renderMenu();
+  toast(`Position neutre enregistrée (${state.controls.calibration.toFixed(0)}°)`, '#4dffc8', 1600);
+}
+
+function cycleSensitivity() {
+  state.controls.sensitivity = nextSensitivity(state.controls.sensitivity);
+  tilt.sensitivity = state.controls.sensitivity;
+  persistControls();
+  renderMenu();
+  toast(SENSITIVITY_LABEL[state.controls.sensitivity], '#40c8ff', 1200);
+}
+
+function cycleThrottleMode() {
+  state.controls.throttleMode = nextThrottleMode(state.controls.throttleMode);
+  persistControls();
+  applyControlUi();
+  renderMenu();
+  toast(THROTTLE_MODE_LABEL[state.controls.throttleMode], '#40c8ff', 1400);
+}
+
+function toggleInvertTilt() {
+  state.controls.invertTilt = !state.controls.invertTilt;
+  tilt.invertTilt = state.controls.invertTilt;
+  persistControls();
+  renderMenu();
+  toast(`Sens du gyroscope : ${state.controls.invertTilt ? 'inversé' : 'normal'}`, '#40c8ff', 1400);
 }
 
 function togglePause(v: boolean) {
@@ -815,7 +1121,10 @@ function togglePause(v: boolean) {
     finishTimeout = 0;
     const s = engine.stats;
     $('pauseStats').textContent =
-      `${s.fps} FPS · ${s.particles} particules · rendu ×${s.pixelRatio.toFixed(2)} · qualité ${engine.quality.level}`;
+      `${versionDiagnostics()} · ${s.fps} FPS · ${s.particles} particules · rendu ×${s.pixelRatio.toFixed(2)} · qualité ${engine.quality.level} · ` +
+      `commandes ${state.controls.steerMode === 'gyro' ? (gyroUsable() ? 'gyroscope' : 'gyroscope sans signal') : 'boutons'} · ` +
+      `sensibilité ${state.controls.sensitivity} · accélération ${state.controls.throttleMode}`;
+    renderMenu();
   } else {
     if (engine.race.phase === 'finished') {
       window.clearTimeout(finishTimeout);
@@ -847,7 +1156,17 @@ window.addEventListener('orientationchange', scheduleResize);
 window.visualViewport?.addEventListener('resize', scheduleResize);
 
 /* démarrage : on attend que tout soit monté */
+boot?.note('version', versionInfo());
 try { renderMenu(); } catch (error) { renderFailure(error, 'initialisation du menu'); }
+// Reprise des réglages de commande sauvegardés (mode, sensibilité, calibration).
+tilt.sensitivity = state.controls.sensitivity;
+tilt.invertTilt = state.controls.invertTilt;
+tilt.setCalibration(state.controls.calibration);
+applyControlUi();
+if (state.controls.steerMode === 'gyro') {
+  // Le mode gyroscope n'est réactivé qu'après confirmation de données réelles.
+  void enableGyro();
+}
 boot?.finish();
 $('loading').classList.add('hidden');
 
@@ -879,6 +1198,27 @@ $('loading').classList.add('hidden');
   currentSteer,
   currentDrift,
   currentBrake,
+  currentTurbo,
+  currentThrottle,
+  /** V4.1 — identification de version (menu, diagnostics, tests). */
+  version: () => versionInfo(),
+  /** V4.1 — réglages de commande persistés (lecture seule pour les tests). */
+  controls: () => ({ ...state.controls }),
+  gyroState: () => ({
+    mode: state.controls.steerMode,
+    running: gyro.running,
+    usable: gyroUsable(),
+    hasSample: gyro.hasSample,
+    tilt: tilt.tilt,
+    steer: tilt.steer,
+    calibration: tilt.calibration,
+    sensitivity: state.controls.sensitivity,
+  }),
+  toggleSteerMode,
+  calibrateGyro,
+  cycleSensitivity,
+  cycleThrottleMode,
+  toggleInvertTilt,
   rafActive: () => rafId !== 0,
   hasFinishTimeout: () => finishTimeout !== 0,
   skipCountdown: () => {
@@ -903,7 +1243,15 @@ $('loading').classList.add('hidden');
     let t = performance.now();
     for (let i = 0; i < n; i++) {
       t += dtMs;
-      engine.setInput({ steer: currentSteer(), drift: currentDrift(), brake: currentBrake(), throttle: 1 });
+      // Même séquence que la boucle réelle : le volant virtuel avance aussi.
+      updateTilt(performance.now());
+      engine.setInput({
+        steer: currentSteer(),
+        drift: currentDrift(),
+        brake: currentBrake(),
+        throttle: currentThrottle(),
+        turbo: currentTurbo(),
+      });
       engine.frame(t, renderEach || i === n - 1);
     }
     updateHud();
