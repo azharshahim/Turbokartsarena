@@ -554,6 +554,9 @@ function showResults() {
   persistGarage();
   rows.push(`<div class="resultsRow"><span class="label">TURBO COINS</span><b style="color:#ffd21f">+${gain} · solde ${garage.coins}</b></div>`);
   $('resultCard').innerHTML = rows.join('');
+  // Détacher l'observateur AVANT la destruction : forceContextLoss() émet un
+  // `webglcontextlost` asynchrone qui serait sinon signalé comme une panne.
+  releaseRaceContext();
   engine.dispose();
   engine = null;
 }
