@@ -63,6 +63,13 @@ jobs:
         with:
           name: narrowing-webgl-diagnostics
           path: .preview/narrowing/
+      - name: Stabilité GPU — course prolongée et libération des ressources
+        run: npm run test:browser:gpu
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpu-stability-diagnostics
+          path: .preview/gpu-stability/
       - name: Construire la référence V3 publiée pour les captures réelles
         run: |
           git fetch --no-tags origin 4c8fcb57bfc1d1bf5ed3eda5963107a018767831

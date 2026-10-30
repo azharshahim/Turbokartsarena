@@ -885,8 +885,10 @@ export function createScenery(
     group,
     animated,
     dispose() {
+      bannerTex.dispose();
       for (const d of disposables) d.dispose();
       group.traverse((o) => {
+        if (o instanceof THREE.InstancedMesh) o.dispose();
         if ((o as THREE.Mesh).isMesh) {
           const m = (o as THREE.Mesh).material;
           if (Array.isArray(m)) m.forEach((x) => x.dispose());
