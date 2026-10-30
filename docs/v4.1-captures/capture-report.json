@@ -5,7 +5,7 @@
     "dpr": 2
   },
   "sensors": "simulés (DeviceOrientationEvent construits dans la page), aucun téléphone physique",
-  "version": "V4.1.0-dev · Build 02b21af",
+  "version": "V4.1.0-dev · Build cb8fe58+local",
   "captures": [
     "01-menu-commandes.png",
     "01b-menu-commandes-bas.png",
@@ -13,5 +13,5 @@
     "03-course-hud.png",
     "04-course-gyroscope.png"
   ],
-  "domSize": 773851
+  "domSize": 776512
 }

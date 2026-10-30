@@ -756,6 +756,7 @@ bind('steerModeBtn', 'click', () => void toggleSteerMode());
 bind('pauseGyroBtn', 'click', () => void toggleSteerMode());
 bind('calibrateBtn', 'click', () => calibrateGyro());
 bind('pauseCalibrateBtn', 'click', () => calibrateGyro());
+bind('recenterBtn', 'click', () => recenterGyro());
 bind('sensitivityBtn', 'click', () => cycleSensitivity());
 bind('throttleModeBtn', 'click', () => cycleThrottleMode());
 bind('pauseThrottleBtn', 'click', () => cycleThrottleMode());
@@ -893,6 +894,7 @@ window.addEventListener('keydown', (e) => {
   }
   if (state.screen !== 'race' || state.paused || e.repeat) return;
   if (e.key === 'f' || e.key === 'F') { engine?.firePlayerWeapon(); return; }
+  if (e.key === 'r' || e.key === 'R') { recenterGyro(); return; }
   if (e.key === ' ') e.preventDefault();
   keys.add(normalizeKey(e.key));
 });
@@ -1076,6 +1078,23 @@ function calibrateGyro() {
   toast(`Position neutre enregistrée (${state.controls.calibration.toFixed(0)}°)`, '#4dffc8', 1600);
 }
 
+/**
+ * Recentrage **en course** (V4.1) : la position neutre rejoint doucement la
+ * position actuelle (~0,3 s), donc la direction revient au centre sans à-coup.
+ * Contrairement à `calibrateGyro`, rien n'est enregistré : c'est une aide de
+ * session, le réglage persistant reste celui du menu.
+ */
+function recenterGyro() {
+  if (state.controls.steerMode !== 'gyro' || !gyro.running || !gyro.hasSample) {
+    toast('Activez le gyroscope pour recentrer la direction', '#ff9a2e', 1600);
+    return;
+  }
+  primeTilt();
+  const target = tilt.recenter();
+  renderControlLabels();
+  toast(`Direction recentrée (neutre ${target.toFixed(0)}°)`, '#4dffc8', 1200);
+}
+
 function cycleSensitivity() {
   state.controls.sensitivity = nextSensitivity(state.controls.sensitivity);
   tilt.sensitivity = state.controls.sensitivity;
@@ -1216,6 +1235,7 @@ $('loading').classList.add('hidden');
   }),
   toggleSteerMode,
   calibrateGyro,
+  recenterGyro,
   cycleSensitivity,
   cycleThrottleMode,
   toggleInvertTilt,

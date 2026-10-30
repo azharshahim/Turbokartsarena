@@ -14,9 +14,15 @@
  * L'angle obtenu est « l'inclinaison du volant » : indépendant du sens de
  * rotation du téléphone (paysage gauche / paysage droit / portrait).
  *
- * Robustesse :
- *  - zone morte réglable (évite le tremblement du pouce) ;
- *  - filtrage passe-bas dépendant du temps (indépendant du framerate) ;
+ * Robustesse (V4.1 — stabilisation de la direction) :
+ *  - zone morte de 3° en mode Normal, réglable en un seul endroit ;
+ *  - filtrage passe-bas **adaptatif** : plus fort près du centre (le tremblement
+ *    du bras est absorbé), plus léger dès qu'on incline (réponse franche en virage) ;
+ *  - recalage automatique du neutre : la dérive lente du poignet est compensée
+ *    *à l'intérieur* de la zone morte, donc sans jamais modifier un vrai virage ;
+ *  - recentrage progressif (bouton en course) : la position neutre rejoint la
+ *    position actuelle en ~0,3 s, sans à-coup de direction ;
+ *  - rotation d'écran : le braquage est conservé à l'identique (aucun saut) ;
  *  - limitation de la vitesse de variation (pas de coup de volant involontaire) ;
  *  - détection automatique du demi-tour de référentiel (convention navigateur) ;
  *  - téléphone à plat ⇒ 0 (aucune oscillation possible) ;
@@ -39,11 +45,56 @@ export interface GyroPreset {
   maxRate: number;
 }
 
+/**
+ * Zone morte de référence, en degrés — **seul endroit à modifier** pour régler la
+ * tolérance au tremblement. Le mode Normal l'utilise telle quelle (~3°), le mode
+ * Doux l'élargit (confort), le mode Sport la resserre (précision).
+ */
+export const GYRO_DEADZONE_DEG = 3;
+/** Échelle de la zone morte par sensibilité. */
+export const GYRO_DEADZONE_SCALE: Record<GyroSensitivity, number> = { soft: 1.7, normal: 1, sport: 0.7 };
+/** Course d'inclinaison (au-delà de la zone morte) pour le braquage maximal. */
+export const GYRO_RANGE_DEG: Record<GyroSensitivity, number> = { soft: 34, normal: 24, sport: 16 };
+/** Lissage de base (1/s) : plus bas = plus filtré. */
+export const GYRO_SMOOTHING: Record<GyroSensitivity, number> = { soft: 8, normal: 13, sport: 19 };
+/** Limite de variation du braquage (par seconde). */
+export const GYRO_MAX_RATE: Record<GyroSensitivity, number> = { soft: 2, normal: 3.4, sport: 5.5 };
+
 export const GYRO_PRESETS: Record<GyroSensitivity, GyroPreset> = {
-  soft: { deadzone: 4.5, range: 32, smoothing: 9, maxRate: 2.2 },
-  normal: { deadzone: 3, range: 21, smoothing: 15, maxRate: 4.2 },
-  sport: { deadzone: 2, range: 13, smoothing: 22, maxRate: 7 },
+  soft: {
+    deadzone: GYRO_DEADZONE_DEG * GYRO_DEADZONE_SCALE.soft,
+    range: GYRO_RANGE_DEG.soft,
+    smoothing: GYRO_SMOOTHING.soft,
+    maxRate: GYRO_MAX_RATE.soft,
+  },
+  normal: {
+    deadzone: GYRO_DEADZONE_DEG * GYRO_DEADZONE_SCALE.normal,
+    range: GYRO_RANGE_DEG.normal,
+    smoothing: GYRO_SMOOTHING.normal,
+    maxRate: GYRO_MAX_RATE.normal,
+  },
+  sport: {
+    deadzone: GYRO_DEADZONE_DEG * GYRO_DEADZONE_SCALE.sport,
+    range: GYRO_RANGE_DEG.sport,
+    smoothing: GYRO_SMOOTHING.sport,
+    maxRate: GYRO_MAX_RATE.sport,
+  },
 };
+
+/** Filtrage renforcé près du centre (facteur appliqué au lissage de base). */
+export const GYRO_NEAR_CENTER_DAMPING = 0.55;
+/** Recentrage doux : constante de temps ≈ 1/7 s. */
+export const GYRO_RECENTER_RATE = 7;
+/** Recalage auto du neutre : immobilité exigée avant d'agir. */
+export const GYRO_TRIM_DELAY_S = 0.9;
+/** Recalage auto : vitesse (1/s) de rapprochement du neutre. */
+export const GYRO_TRIM_RATE = 0.5;
+/** Recalage auto : mouvement maximal (deg/s) au-delà duquel on ne recalage pas. */
+export const GYRO_TRIM_MOTION_LIMIT = 6;
+/** Recalage auto : amplitude totale autorisée autour de la calibration (±degrés). */
+export const GYRO_TRIM_LIMIT_DEG = 10;
+/** Rotation d'écran : décalage maximal reporté sur le neutre (anti-fantôme). */
+export const GYRO_ROTATION_SHIFT_LIMIT = 45;
 
 /** Durée sans échantillon au-delà de laquelle le capteur est considéré muet. */
 export const GYRO_SIGNAL_TIMEOUT_MS = 1200;
@@ -122,17 +173,27 @@ export function tiltDegrees(betaDeg: number, gammaDeg: number, screenAngle: Scre
 }
 
 /**
- * Convertisseur inclinaison → braquage, avec zone morte, lissage et limitation
- * de vitesse. Instancié une seule fois par hôte (web / natif).
+ * Convertisseur inclinaison → braquage, avec zone morte, lissage adaptatif,
+ * recalage automatique du neutre et recentrage progressif.
+ * Instancié une seule fois par hôte (web / natif) ; module pur, testé sous Node.
  */
 export class TiltSteering {
   sensitivity: GyroSensitivity = 'normal';
   invertTilt = false;
 
-  /** Calibration : inclinaison considérée comme « volant droit ». */
+  /** Position neutre courante (peut dériver dans la zone morte). */
   private rest = 0;
+  /** Cible du recentrage progressif. */
+  private restTarget = 0;
+  /** Position neutre de référence (calibration explicite, bornée ±35°). */
+  private restRef = 0;
   private smoothed = 0;
   private value = 0;
+  /** Dernière inclinaison brute, pour la détection d'immobilité. */
+  private lastRaw = 0;
+  /** Angle d'écran du dernier échantillon (rotation ⇒ re-cadrage sans saut). */
+  private angle: ScreenAngle = 0;
+  private stillTime = 0;
   private lastSampleAt = Number.NEGATIVE_INFINITY;
   private samples = 0;
   private started = false;
@@ -141,9 +202,14 @@ export class TiltSteering {
     return GYRO_PRESETS[this.sensitivity] ?? GYRO_PRESETS.normal;
   }
 
-  /** Position neutre mémorisée, en degrés. */
+  /** Position neutre effective, en degrés (calibration + recalage automatique). */
   get calibration(): number {
     return this.rest;
+  }
+
+  /** Calibration explicite (référence), en degrés. */
+  get reference(): number {
+    return this.restRef;
   }
 
   /** Inclinaison lissée, corrigée de la calibration (degrés). */
@@ -163,21 +229,46 @@ export class TiltSteering {
     return this.samples;
   }
 
-  setCalibration(degrees: number): void {
-    if (!Number.isFinite(degrees)) return;
-    this.rest = clamp(degrees, -35, 35);
+  /** Durée d'immobilité utile au recalage automatique du neutre (diagnostics/tests). */
+  get stillness(): number {
+    return this.stillTime;
   }
 
-  /** Définit la position neutre à partir de l'inclinaison actuelle. */
+  setCalibration(degrees: number): void {
+    if (!Number.isFinite(degrees)) return;
+    const bounded = clamp(degrees, -35, 35);
+    this.rest = bounded;
+    this.restTarget = bounded;
+    this.restRef = bounded;
+  }
+
+  /** Définit la position neutre **instantanément** (départ de course, menu). */
   calibrate(): number {
-    this.rest = clamp(this.started ? this.smoothed : 0, -35, 35);
-    return this.rest;
+    const degrees = clamp(this.started ? this.smoothed : 0, -35, 35);
+    this.setCalibration(degrees);
+    this.stillTime = 0;
+    return degrees;
+  }
+
+  /**
+   * Recentrage **progressif** (bouton « Recentrer » en course) : la position
+   * neutre rejoint la position actuelle en ~0,3 s. Le braquage revient donc au
+   * centre sans à-coup, contrairement à une calibration instantanée.
+   * @returns la cible enregistrée (degrés), à persister si nécessaire.
+   */
+  recenter(): number {
+    const target = clamp(this.started ? this.smoothed : 0, -35, 35);
+    this.restTarget = target;
+    this.restRef = target;
+    this.stillTime = 0;
+    return target;
   }
 
   /** Remet la direction au centre sans perdre la calibration (pause, changement d'écran). */
   reset(): void {
     this.value = 0;
     this.smoothed = this.started ? this.smoothed : 0;
+    this.stillTime = 0;
   }
 
   /**
@@ -188,21 +279,65 @@ export class TiltSteering {
     if (!Number.isFinite(betaDeg) || !Number.isFinite(gammaDeg)) return this.value;
     const now = typeof nowMs === 'number' && Number.isFinite(nowMs) ? nowMs : Date.now();
     const dt = clamp(Number.isFinite(dtSeconds) ? dtSeconds : 1 / 60, 1 / 240, 0.1);
-    const tilt = tiltDegrees(betaDeg, gammaDeg, normalizeScreenAngle(screenAngle));
+    const angle = normalizeScreenAngle(screenAngle);
+    const raw = tiltDegrees(betaDeg, gammaDeg, angle);
 
     if (!this.started) {
       // Premier échantillon : on s'aligne sans à-coup.
       this.started = true;
-      this.smoothed = tilt;
+      this.smoothed = raw;
+      this.lastRaw = raw;
+      this.angle = angle;
+    } else if (angle !== this.angle) {
+      // Rotation d'écran : on reporte le décalage sur le neutre pour conserver
+      // EXACTEMENT le braquage courant (aucun saut au moment de la bascule).
+      const shift = clamp(raw - this.smoothed, -GYRO_ROTATION_SHIFT_LIMIT, GYRO_ROTATION_SHIFT_LIMIT);
+      this.smoothed = raw;
+      this.rest = clamp(this.rest + shift, -35, 35);
+      this.restTarget = clamp(this.restTarget + shift, -35, 35);
+      this.restRef = clamp(this.restRef + shift, -35, 35);
+      this.angle = angle;
+      this.stillTime = 0;
     } else {
-      this.smoothed = damp(this.smoothed, tilt, this.preset.smoothing, dt);
+      // Filtrage adaptatif : fort près du centre (anti-tremblement), léger en virage.
+      const nearCenter = Math.abs(this.smoothed - this.rest) < this.preset.deadzone * 1.5;
+      const smoothing = this.preset.smoothing * (nearCenter ? GYRO_NEAR_CENTER_DAMPING : 1);
+      this.smoothed = damp(this.smoothed, raw, smoothing, dt);
     }
+
     this.lastSampleAt = now;
     this.samples += 1;
 
-    const raw = this.steerFromTilt((this.smoothed - this.rest) * (this.invertTilt ? -1 : 1));
+    // 1. Recentrage progressif (bouton « Recentrer »).
+    if (this.rest !== this.restTarget) {
+      this.rest = damp(this.rest, this.restTarget, GYRO_RECENTER_RATE, dt);
+      if (Math.abs(this.rest - this.restTarget) < 0.01) this.rest = this.restTarget;
+    } else {
+      // 2. Recalage automatique du neutre : uniquement DANS la zone morte
+      //    (le braquage y vaut déjà 0) et seulement si le téléphone est immobile.
+      //    Un virage, même doux, sort de cette bande : il n'est jamais annulé.
+      const offset = this.smoothed - this.rest;
+      const speed = Math.abs(this.smoothed - this.lastRaw) / dt;
+      if (Math.abs(offset) <= this.preset.deadzone && speed < GYRO_TRIM_MOTION_LIMIT) {
+        this.stillTime += dt;
+        if (this.stillTime >= GYRO_TRIM_DELAY_S) {
+          const next = clamp(
+            this.rest + offset * clamp(dt * GYRO_TRIM_RATE, 0, 0.2),
+            this.restRef - GYRO_TRIM_LIMIT_DEG,
+            this.restRef + GYRO_TRIM_LIMIT_DEG,
+          );
+          this.rest = next;
+          this.restTarget = next;
+        }
+      } else {
+        this.stillTime = 0;
+      }
+    }
+
+    this.lastRaw = raw;
+    const rawSteer = this.steerFromTilt((this.smoothed - this.rest) * (this.invertTilt ? -1 : 1));
     const maxStep = this.preset.maxRate * dt;
-    this.value = clamp(raw, this.value - maxStep, this.value + maxStep);
+    this.value = clamp(rawSteer, this.value - maxStep, this.value + maxStep);
     return this.value;
   }
 
@@ -213,7 +348,7 @@ export class TiltSteering {
     if (magnitude <= deadzone) return 0;
     const span = Math.max(1, range - deadzone);
     const t = clamp((magnitude - deadzone) / span, 0, 1);
-    // Légère courbe : précision autour du centre, verrouillage franc en butée.
+    // Courbe douce au sortir de la zone morte, verrouillage franc en butée.
     const shaped = t * t * (3 - 2 * t) * 0.35 + t * 0.65;
     return Math.sign(degrees) * shaped;
   }

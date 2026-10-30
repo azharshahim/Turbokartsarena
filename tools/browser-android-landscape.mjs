@@ -179,8 +179,7 @@ try {
 
       // Accélération manuelle : le bouton GAZ apparaît sans chevaucher les autres zones.
       await page.evaluate(() => window.__tka.cycleThrottleMode());
-      await page.waitForTimeout(150);
-      assert.equal(await page.evaluate(() => window.__tka.controls().throttleMode), 'manual', 'mode manuel non appliqué');
+      await page.waitForFunction(() => window.__tka.controls().throttleMode === 'manual', { timeout: 6000 });
       const manual = await page.evaluate(() => {
         const ids = ['leftBtn', 'rightBtn', 'accelBtn', 'fireBtn', 'turboBtn', 'brakeBtn', 'driftBtn'];
         return ids.map((id) => {
@@ -199,6 +198,72 @@ try {
         }
       }
       await page.evaluate(() => window.__tka.cycleThrottleMode());
+      await page.waitForFunction(() => window.__tka.controls().throttleMode === 'auto', { timeout: 6000 });
+
+      // Gyroscope actif (capteur et autorisation SIMULÉS) : le bouton
+      // RECENTRER apparaît en course sans gêner PAUSE, et le recentrage
+      // ramène la direction au centre de façon progressive.
+      await page.evaluate(() => {
+        DeviceOrientationEvent.requestPermission = async () => 'granted';
+        window.__pose = { beta: 4, gamma: -88 };
+        window.__sensorTimer = setInterval(() => {
+          window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', {
+            alpha: 0, beta: window.__pose.beta, gamma: window.__pose.gamma, absolute: true,
+          }));
+        }, 16);
+      });
+      await page.waitForTimeout(160);
+      await page.evaluate(() => window.__tka.toggleSteerMode());
+      await page.waitForFunction(() => window.__tka.controls().steerMode === 'gyro', { timeout: 6000 });
+      const recenterBox = await page.evaluate(() => {
+        const button = document.getElementById('recenterBtn');
+        const rect = button.getBoundingClientRect();
+        const pause = document.getElementById('pauseBtn').getBoundingClientRect();
+        const style = getComputedStyle(button);
+        return { visible: style.display !== 'none', width: rect.width, height: rect.height, right: rect.right, left: rect.left, pauseLeft: pause.left };
+      });
+      assert.equal(recenterBox.visible, true, 'bouton RECENTRER absent en mode gyroscope');
+      assert.ok(recenterBox.height >= MIN_TARGET && recenterBox.width >= MIN_TARGET, `RECENTRER trop petit (${recenterBox.width.toFixed(0)}×${recenterBox.height.toFixed(0)})`);
+      assert.ok(recenterBox.right <= recenterBox.pauseLeft, 'RECENTRER chevauche PAUSE');
+      // Le bouton reçoit bien le point tactile (aucun HUD au-dessus).
+      const recenterHit = await page.evaluate(() => {
+        const rect = document.getElementById('recenterBtn').getBoundingClientRect();
+        const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+        return hit ? hit.id : '';
+      });
+      assert.equal(recenterHit, 'recenterBtn', `RECENTRER couvert par « ${recenterHit} »`);
+      // Inclinaison franche (13° en paysage) : la direction doit tourner.
+      await page.evaluate(() => window.__tka.resumeLoop());
+      await page.waitForTimeout(300);
+      await page.evaluate(() => { window.__pose = { beta: 13, gamma: -88 }; });
+      await page.waitForTimeout(600);
+      const beforeRecenter = await page.evaluate(() => window.__tka.gyroState());
+      assert.ok(beforeRecenter.steer > 0.2, `inclinaison non transmise au volant (${beforeRecenter.steer.toFixed(2)})`);
+      // `force` : le HUD animé rend la vérification de stabilité de Playwright
+      // instable, la zone réellement cliquable est vérifiée ci-dessus.
+      await page.locator('#recenterBtn').click({ force: true, timeout: 5000 });
+      await page.waitForTimeout(800);
+      const afterRecenter = await page.evaluate(() => window.__tka.gyroState());
+      assert.ok(
+        afterRecenter.calibration - beforeRecenter.calibration > 2,
+        'le bouton RECENTRER ne déplace pas le neutre',
+      );
+      assert.ok(
+        Math.abs(afterRecenter.steer) < Math.abs(beforeRecenter.steer) - 0.05,
+        'le recentrage ne ramène pas la direction vers le centre',
+      );
+      assert.ok(
+        Math.abs(afterRecenter.steer) < 0.15,
+        `à-coup de direction après recentrage (${afterRecenter.steer.toFixed(2)})`,
+      );
+      await page.evaluate(() => window.__tka.pauseLoop());
+      await page.evaluate(() => {
+        window.__tka.toggleSteerMode();
+        if (window.__sensorTimer) clearInterval(window.__sensorTimer);
+        window.__sensorTimer = null;
+      });
+      await page.waitForTimeout(120);
+      assert.equal(await page.evaluate(() => window.__tka.controls().steerMode), 'buttons', 'retour aux commandes tactiles impossible');
     }
   }
 
