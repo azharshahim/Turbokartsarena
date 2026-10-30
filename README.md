@@ -7,6 +7,7 @@ Paysage, qualité graphique adaptative et PWA hors connexion. Les performances r
 
 Dossiers de mission :
 
+- [Mission nº12 — audit final de la V4.1](docs/MISSION-12-AUDIT-V4.1.md) ;
 - [Mission nº11 — commandes, gyroscope, HUD, version](docs/MISSION-11-V4.1.md)
   et son [audit des commandes](docs/MISSION-11-AUDIT-COMMANDES.md) ;
 - [Mission nº10 — fausse alerte WebGL](docs/MISSION-10-FAUSSE-ALERTE-WEBGL.md) ;
@@ -337,7 +338,10 @@ npm run test:v2          # matrice circuits/véhicules, physique moto, modèles 
 npm run test:browser     # scénarios Playwright pause, commandes, orientation et console
 npm run test:mission10   # stabilité WebGL : perte de contexte et destructions ordonnées
 npm run test:mission11   # commandes V4.1 : zones, turbo, gyroscope, persistance, version
+npm run test:mission12   # audit V4.1 : version/build, sauvegardes, conduite des 14 véhicules
+npm run test:build-id    # le bundle livré annonce le commit qui contient réellement son code
 npm run test:browser:mission11  # DOM réel : 7 zones tactiles, turbo, gyro simulé, captures
+npm run test:browser:android:layout  # confort des commandes sur 5 écrans paysage
 npm run test:pwa         # installation, hors connexion et mises à jour du cache
 npm run typecheck        # vérifie les types React Native + preview
 npx expo export --platform android --output-dir /tmp/tka-android-export  # bundle Expo Android
@@ -352,6 +356,14 @@ pas de blocage, temps au tour cohérents), le classement, le compte à rebours,
 le formatage des temps, la détection de qualité et l'équilibrage du casting.
 `npm run test:browser` utilise Playwright/Chromium : lance `npx playwright install chromium`
 si le navigateur n'est pas encore installé.
+
+**Identification de version** : tout est centralisé dans `src/core/version.ts`. Le
+build est calculé au moment de la compilation (`git rev-parse --short=7 HEAD`,
+surchargeable par `TKA_GIT_COMMIT` / `EXPO_PUBLIC_TKA_BUILD`), écrit dans
+`<meta name="tka-build">` et affiché `V4.1.0-dev · Build 1b37067`. Un build réalisé
+avec des sources non commitées porte le suffixe explicite `+local`, et un build hors
+dépôt Git affiche `sans-git` — jamais un faux hash. `npm run test:build-id` refuse
+tout bundle dont le commit affiché ne contient pas exactement les sources compilées.
 
 **Conventions verrouillées par les tests** (source de bugs historiques) :
 

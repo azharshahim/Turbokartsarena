@@ -7,17 +7,25 @@
  *
  * Le build est dérivé du commit Git qui a produit le bundle :
  *  - web (esbuild, `tools/build-preview.mjs`) : `define: { __TKA_GIT_COMMIT__ }` ;
- *  - application Expo/Metro : variable `EXPO_PUBLIC_TKA_BUILD` lue au bundling ;
+ *  - application Expo/Metro : variable `EXPO_PUBLIC_TKA_BUILD` inlinée au bundling ;
  *  - à défaut (dépôt sans `.git`, archive, binaire sans métadonnée) : l'identifiant
  *    de secours EXPLICITE `sans-git` est affiché — jamais un faux hash.
+ *
+ * Build local : si la compilation a été faite avec des sources modifiées non
+ * commitées, le build porte le suffixe explicite `+local`
+ * (« Build 1b37067+local »). Un identifiant nu désigne donc toujours un build
+ * dont les sources sont exactement celles de ce commit. C'est vérifié en CI par
+ * `npm run test:build-id` (le commit affiché doit être un ancêtre de HEAD et les
+ * sources ne doivent pas différer).
  *
  * Version fonctionnelle de cette mission : **V4.1.0-dev**.
  * Tant que la branche n'est pas fusionnée et validée, le canal reste `dev` :
  * l'affichage ne doit jamais prétendre à une version publique stable.
  */
 
-/* Injecté au build par esbuild ; absent sous Metro/Node (guard `typeof`). */
+/* Injectés au build par esbuild ; absents sous Metro/Node (guard `typeof`). */
 declare const __TKA_GIT_COMMIT__: string | undefined;
+declare const __TKA_BUILD_LOCAL__: boolean | undefined;
 
 export interface VersionNumber {
   readonly major: number;
@@ -37,6 +45,8 @@ export const VERSION_CHANNEL: VersionChannel = 'dev';
 
 /** Identifiant de secours quand aucun commit n'est disponible. */
 export const BUILD_FALLBACK_ID = 'sans-git';
+/** Suffixe des builds compilés avec des sources non commitées. */
+export const BUILD_LOCAL_SUFFIX = '+local';
 /** Longueur du hash court affiché (identique à `git rev-parse --short`). */
 export const BUILD_ID_LENGTH = 7;
 
@@ -87,9 +97,22 @@ export function resolveBuildCommit(explicit?: string | null): string | null {
   return null;
 }
 
-/** « 2bd9c14 » ou le repli explicite « sans-git ». */
+/**
+ * `true` si le bundle a été compilé avec des modifications non commitées.
+ * Information injectée au build : un tel build ne prétend jamais être « propre ».
+ */
+export function isLocalBuild(): boolean {
+  const runtime = (globalThis as { __TKA_BUILD_LOCAL__?: unknown }).__TKA_BUILD_LOCAL__;
+  if (typeof runtime === 'boolean') return runtime;
+  if (typeof __TKA_BUILD_LOCAL__ !== 'undefined') return __TKA_BUILD_LOCAL__ === true;
+  return false;
+}
+
+/** « 1b37067 », « 1b37067+local » ou le repli explicite « sans-git ». */
 export function buildId(commit?: string | null): string {
-  return resolveBuildCommit(commit) ?? BUILD_FALLBACK_ID;
+  const resolved = resolveBuildCommit(commit);
+  if (!resolved) return BUILD_FALLBACK_ID;
+  return isLocalBuild() ? `${resolved}${BUILD_LOCAL_SUFFIX}` : resolved;
 }
 
 /** Valeur du repli : le build n'est pas rattaché à un commit (à signaler dans les diagnostics). */
@@ -105,7 +128,11 @@ export function versionBadge(commit?: string | null): string {
 /** Libellé long pour les écrans de diagnostics techniques. */
 export function versionDiagnostics(commit?: string | null): string {
   const id = buildId(commit);
-  const suffix = isFallbackBuild(commit) ? ' (commit indisponible)' : '';
+  const suffix = isFallbackBuild(commit)
+    ? ' (commit indisponible : build hors dépôt)'
+    : isLocalBuild()
+      ? ' (sources non commitées)'
+      : '';
   return `${VERSION_LABEL} · Build ${id}${suffix} · ${IS_DEV_BUILD ? 'canal développement' : 'version publiée'}`;
 }
 
@@ -117,6 +144,8 @@ export function versionInfo(commit?: string | null) {
     channel: VERSION_CHANNEL,
     isDev: IS_DEV_BUILD,
     build: buildId(commit),
+    commit: resolveBuildCommit(commit),
+    local: isLocalBuild(),
     buildFallback: isFallbackBuild(commit),
     badge: versionBadge(commit),
     diagnostics: versionDiagnostics(commit),

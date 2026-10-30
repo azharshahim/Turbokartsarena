@@ -14,7 +14,7 @@
  *
  * ⚠️ Ce que ces tests ne prouvent PAS : le comportement réel des capteurs sur un
  * Samsung Adreno 830, le ressenti au pouce et les FPS. Ces points restent à
- * valider sur l'appareil (voir docs/V4.1-JOUABILITE.md).
+ * valider sur l'appareil (voir docs/MISSION-11-V4.1.md).
  */
 import * as assert from 'node:assert';
 import { readFileSync } from 'node:fs';

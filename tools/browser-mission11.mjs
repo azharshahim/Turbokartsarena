@@ -45,7 +45,7 @@ try {
 
   /* ---------- 1. Version affichée ---------- */
   const badge = await page.locator('#versionBadge').innerText();
-  assert.match(badge, /V4\.1\.0-dev · Build ([0-9a-f]{7}|sans-git)/, `badge de version inattendu : ${badge}`);
+  assert.match(badge, /V4\.1\.0-dev · Build ([0-9a-f]{7}(?:\+local)?|sans-git)/, `badge de version inattendu : ${badge}`);
   const version = await page.evaluate(() => window.__tka.version());
   assert.equal(version.channel, 'dev');
   assert.equal(version.version, '4.1.0');

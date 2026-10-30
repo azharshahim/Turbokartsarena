@@ -23,8 +23,41 @@ function resolveGitCommit() {
     return '';
   }
 }
+
+/**
+ * Le build est-il fait avec des sources modifiées non commitées ?
+ * Les sorties de build elles-mêmes (index.html, service-worker.js) ne comptent
+ * pas : elles sont régénérées à chaque compilation. Tout autre fichier suivi
+ * modifié ⇒ suffixe `+local`, pour qu'un bundle jamais publié ne puisse pas
+ * revendiquer un commit propre.
+ */
+const BUILD_OUTPUTS = new Set(['index.html', 'service-worker.js']);
+/** Les captures de tests sont régénérées : elles ne rendent pas un build « sale ». */
+const GENERATED_PREFIXES = ['docs/v4.1-captures/'];
+function isSourceDirty() {
+  if (process.env.TKA_BUILD_FORCE_CLEAN === '1') return false;
+  try {
+    const out = execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return out
+      .split('\n')
+      .filter((line) => line.trim().length > 0)
+      .some((line) => {
+        // Format porcelain : deux colonnes d'état puis un espace (` M index.html`).
+        const path = line.slice(3).trim().replace(/^"|"$/g, '');
+        if (BUILD_OUTPUTS.has(path)) return false;
+        return !GENERATED_PREFIXES.some((prefix) => path.startsWith(prefix));
+      });
+  } catch {
+    return false;
+  }
+}
+
 const gitCommit = resolveGitCommit();
+const buildLocal = Boolean(gitCommit) && isSourceDirty();
+const commitLabel = gitCommit ? `${gitCommit}${buildLocal ? '+local' : ''}` : 'sans-git';
 if (!gitCommit) console.warn('⚠️  Commit Git indisponible : la version affichera « Build sans-git ».');
+else if (buildLocal) console.warn('⚠️  Sources non commitées : le build sera marqué « +local ».');
+
 
 mkdirSync('preview/dist', { recursive: true });
 mkdirSync('dist', { recursive: true });
@@ -39,13 +72,23 @@ const base = {
   sourcemap: false,
   minify: true,
   // Identification de version centralisée (`src/core/version.ts`).
-  define: { __TKA_GIT_COMMIT__: JSON.stringify(gitCommit) },
+  define: {
+    __TKA_GIT_COMMIT__: JSON.stringify(gitCommit),
+    __TKA_BUILD_LOCAL__: JSON.stringify(buildLocal),
+  },
 };
 
 /* ---------- 1. build séparé (dev) ---------- */
 const html = readFileSync('preview/index.html', 'utf8')
   .replace('/*TKA_BOOT_DIAGNOSTICS*/', () => readFileSync('preview/boot-diagnostics.js', 'utf8'))
-  .split('./preview/main.ts').join('./preview.js');
+  .split('./preview/main.ts').join('./preview.js')
+  // Le badge est aussi écrit en dur dans le HTML : lisible sans JavaScript.
+  .split('<div id="versionBadge">V4.1.0-dev · Build —</div>')
+  .join(`<div id="versionBadge">V4.1.0-dev · Build ${commitLabel}</div>`)
+  .replace(
+    /<meta charset="utf-8" \/>/,
+    () => `<meta charset="utf-8" />\n    <meta name="tka-build" content="${commitLabel}" />`,
+  );
 writeFileSync('preview/dist/index.html', html);
 
 if (watch) {
@@ -67,13 +110,14 @@ const single = html
   .replace(
     '<script type="module" src="./preview.js"></script>',
     () => `<script type="module">\n${js}\n</script>`,
-  );
+  )
+  .split('<div id="versionBadge">V4.1.0-dev · Build —</div>')
+  .join(`<div id="versionBadge">V4.1.0-dev · Build ${commitLabel}</div>`);
 writeFileSync('dist/turbo-karts-arena.html', single);
 writeFileSync('index.html', single);
 const kb = (single.length / 1024).toFixed(0);
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
-const commitLabel = gitCommit ? `Build ${gitCommit}` : 'Build sans-git';
-console.log(`\n🏷️  Version ${pkg.version} · ${commitLabel}`);
+console.log(`\n🏷️  Version ${pkg.version} · Build ${commitLabel}`);
 console.log(`\n✅ dist/turbo-karts-arena.html (${kb} Ko, autonome, hors ligne)`);
 console.log('✅ preview/dist/index.html (build de dev)');
 console.log('✅ index.html (bundle déployable GitHub Pages)');

@@ -36,7 +36,10 @@ jobs:
       - run: npm run test:v4
       - run: npm run test:mission10
       - run: npm run test:mission11
+      - run: npm run test:mission12
       - run: npm run preview:build
+      # Le bundle livré doit annoncer un commit qui contient réellement son code.
+      - run: npm run test:build-id
       - name: Installer Chromium pour Playwright
         run: npx playwright install --with-deps chromium
       - name: Régressions navigateur via HTTP
@@ -61,11 +64,14 @@ jobs:
             sleep 1
           done
           BROWSER_TEST_URL=http://127.0.0.1:5173/index.html npm run test:browser:mission11
+          BROWSER_TEST_URL=http://127.0.0.1:5173/index.html npm run test:browser:android:layout
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: v41-captures
-          path: docs/v4.1-captures/
+          path: |
+            docs/v4.1-captures/
+            .preview/android-layout/
       - name: Chrome Android — démarrage, rotation et perte de contexte
         run: npm run test:browser:android
       - uses: actions/upload-artifact@v4
@@ -105,6 +111,10 @@ jobs:
       - run: npx expo prebuild --platform android --no-install
       - name: "Build APK (release, signé avec la clé debug : installable directement)"
         working-directory: android
+        # Le bundle Metro reçoit le commit réel : même identification de version
+        # que la version web (aucun hash codé en dur).
+        env:
+          EXPO_PUBLIC_TKA_BUILD: ${{ github.sha }}
         run: ./gradlew assembleRelease --no-daemon
       - name: Renommer l'APK
         run: cp android/app/build/outputs/apk/release/app-release.apk turbo-karts-arena.apk
