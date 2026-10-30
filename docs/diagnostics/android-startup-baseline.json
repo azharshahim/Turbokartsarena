@@ -1,0 +1,24 @@
+{
+  "commit": "252a4a9",
+  "device": "Chromium SwiftShader, mobile/touch 360x780 @ DPR3, not physical Samsung",
+  "normal": {
+    "canvasWritesIn500ms": 28,
+    "multisampledRGBA16F": [
+      [
+        36161,
+        4,
+        34842,
+        512,
+        512
+      ]
+    ]
+  },
+  "deniedWebGL": {
+    "bootstrapped": false,
+    "loaderVisible": true,
+    "hasErrorMessage": false,
+    "errors": [
+      "Error creating WebGL context."
+    ]
+  }
+}

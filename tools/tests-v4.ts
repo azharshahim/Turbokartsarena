@@ -89,6 +89,16 @@ for (const theme of ['alpes', 'ocean', 'tropical', 'sahara', 'volcanic']) {
   scenery.update(1, { x: 0, y: 0, z: 0 }, false);
   scenery.update(2, { x: 0, y: 0, z: 0 }, true);
   assert.ok(scenery.group.children.length > 0);
+  scenery.group.traverse(o => {
+    if (!(o instanceof Mesh)) return;
+    const materials = Array.isArray(o.material) ? o.material : [o.material];
+    if (!materials.some(m => (m as import('three').MeshStandardMaterial).isMeshStandardMaterial)) return;
+    const normals = o.geometry.getAttribute('normal');
+    assert.ok(normals, `${theme}: lit scenery needs normals (NaN otherwise spreads through HDR bloom)`);
+    assert.equal(normals.count, o.geometry.getAttribute('position').count);
+    for (let i = 0; i < normals.count; i++)
+      assert.ok(Number.isFinite(normals.getX(i) + normals.getY(i) + normals.getZ(i)), `${theme}: finite normals`);
+  });
   scenery.dispose(); visual.dispose(); mats.dispose();
 }
 assert.equal(terrainAtProgress('alpes', .35), 'asphalt');

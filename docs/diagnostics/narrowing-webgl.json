@@ -1,0 +1,944 @@
+{
+  "baselineCommit": "d9eb076af14f2854124cd4be2d2a8fd5f44d2fe8",
+  "physicalSamsung": false,
+  "note": "Chromium/SwiftShader, touch emulation. Controlled track-position fixtures, not a complete phone race. The disappearance of the HTML warning was not reproduced as a rendering fault.",
+  "baselineRegression": {
+    "s": 360,
+    "mode": "stable",
+    "warning": "⚠ Forte descente · 1 m",
+    "warningBounds": [
+      174.296875,
+      27
+    ],
+    "blackFraction": 1,
+    "rightBlackFraction": 1,
+    "hdr": {
+      "nonFinite": 66,
+      "error": 0,
+      "status": 36053
+    },
+    "viewport": [
+      0,
+      0,
+      1464,
+      659
+    ],
+    "scissor": [
+      0,
+      0,
+      480,
+      240
+    ],
+    "scissorEnabled": false,
+    "defaultFramebuffer": true,
+    "framebufferStatus": 36053,
+    "dimensions": [
+      1464,
+      659
+    ],
+    "cssDimensions": [
+      915,
+      412
+    ],
+    "pixelRatio": 1.6,
+    "error": 0,
+    "resizeEvents": 0,
+    "effects": [
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "baselineNarrowingTraversal": [
+    {
+      "fixed": false,
+      "s": 78,
+      "warning": "⚠ Rétrécissement · 12 m",
+      "black": 0.021769059366544646,
+      "error": 0,
+      "scissorEnabled": false,
+      "framebufferStatus": 36053
+    },
+    {
+      "fixed": false,
+      "s": 93,
+      "warning": "",
+      "black": 0.020479203140750173,
+      "error": 0,
+      "scissorEnabled": false,
+      "framebufferStatus": 36053
+    },
+    {
+      "fixed": false,
+      "s": 408,
+      "warning": "⚠ Rétrécissement · 13 m",
+      "black": 0.6796149663112101,
+      "error": 0,
+      "scissorEnabled": false,
+      "framebufferStatus": 36053
+    },
+    {
+      "fixed": false,
+      "s": 423,
+      "warning": "⚠ Virage à gauche · 28 m",
+      "black": 0.026998116610960795,
+      "error": 0,
+      "scissorEnabled": false,
+      "framebufferStatus": 36053
+    },
+    {
+      "fixed": false,
+      "s": 498,
+      "warning": "⚠ Rétrécissement · 13 m",
+      "black": 0.017110324155127594,
+      "error": 0,
+      "scissorEnabled": false,
+      "framebufferStatus": 36053
+    },
+    {
+      "fixed": false,
+      "s": 513,
+      "warning": "",
+      "black": 0.01127380762905194,
+      "error": 0,
+      "scissorEnabled": false,
+      "framebufferStatus": 36053
+    },
+    {
+      "fixed": false,
+      "s": 738,
+      "warning": "⚠ Rétrécissement · 14 m",
+      "black": 0.012230091782057403,
+      "error": 0,
+      "scissorEnabled": false,
+      "framebufferStatus": 36053
+    },
+    {
+      "fixed": false,
+      "s": 753,
+      "warning": "",
+      "black": 0.017398137832245742,
+      "error": 0,
+      "scissorEnabled": false,
+      "framebufferStatus": 36053
+    },
+    {
+      "fixed": true,
+      "s": 78,
+      "warning": "⚠ Rétrécissement · 12 m",
+      "black": 0.02168351106159478,
+      "error": 0,
+      "scissorEnabled": false,
+      "framebufferStatus": 36053
+    },
+    {
+      "fixed": true,
+      "s": 93,
+      "warning": "",
+      "black": 0.020666215714361506,
+      "error": 0,
+      "scissorEnabled": false,
+      "framebufferStatus": 36053
+    },
+    {
+      "fixed": true,
+      "s": 408,
+      "warning": "⚠ Rétrécissement · 13 m",
+      "black": 0.019160830813305746,
+      "error": 0,
+      "scissorEnabled": false,
+      "framebufferStatus": 36053
+    },
+    {
+      "fixed": true,
+      "s": 423,
+      "warning": "⚠ Virage à gauche · 28 m",
+      "black": 0.027208339964984878,
+      "error": 0,
+      "scissorEnabled": false,
+      "framebufferStatus": 36053
+    },
+    {
+      "fixed": true,
+      "s": 498,
+      "warning": "⚠ Rétrécissement · 13 m",
+      "black": 0.01738421136399809,
+      "error": 0,
+      "scissorEnabled": false,
+      "framebufferStatus": 36053
+    },
+    {
+      "fixed": true,
+      "s": 513,
+      "warning": "",
+      "black": 0.011377924558332007,
+      "error": 0,
+      "scissorEnabled": false,
+      "framebufferStatus": 36053
+    },
+    {
+      "fixed": true,
+      "s": 738,
+      "warning": "⚠ Rétrécissement · 14 m",
+      "black": 0.012585548304949864,
+      "error": 0,
+      "scissorEnabled": false,
+      "framebufferStatus": 36053
+    },
+    {
+      "fixed": true,
+      "s": 753,
+      "warning": "",
+      "black": 0.017475064990185155,
+      "error": 0,
+      "scissorEnabled": false,
+      "framebufferStatus": 36053
+    }
+  ],
+  "correctedRegression": {
+    "physicalSamsung": false,
+    "viewport": "915×412, DPR2, Chromium Android UA/touch, SwiftShader",
+    "cases": [
+      {
+        "s": 360,
+        "mode": "stable",
+        "warning": "⚠ Forte descente · 1 m",
+        "warningBounds": [
+          174.296875,
+          27
+        ],
+        "blackFraction": 0.005704951201107822,
+        "rightBlackFraction": 0.0019035598853297186,
+        "hdr": {
+          "nonFinite": 0,
+          "error": 0,
+          "status": 36053
+        },
+        "viewport": [
+          0,
+          0,
+          1464,
+          659
+        ],
+        "scissor": [
+          0,
+          0,
+          480,
+          240
+        ],
+        "scissorEnabled": false,
+        "defaultFramebuffer": true,
+        "framebufferStatus": 36053,
+        "dimensions": [
+          1464,
+          659
+        ],
+        "cssDimensions": [
+          915,
+          412
+        ],
+        "pixelRatio": 1.6,
+        "error": 0,
+        "resizeEvents": 0,
+        "effects": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "s": 408,
+        "mode": "stable",
+        "warning": "⚠ Rétrécissement · 13 m",
+        "warningBounds": [
+          186.4375,
+          27
+        ],
+        "blackFraction": 0.017989668068028226,
+        "rightBlackFraction": 0.018514559015546085,
+        "hdr": {
+          "nonFinite": 0,
+          "error": 0,
+          "status": 36053
+        },
+        "viewport": [
+          0,
+          0,
+          1464,
+          659
+        ],
+        "scissor": [
+          0,
+          0,
+          480,
+          240
+        ],
+        "scissorEnabled": false,
+        "defaultFramebuffer": true,
+        "framebufferStatus": 36053,
+        "dimensions": [
+          1464,
+          659
+        ],
+        "cssDimensions": [
+          915,
+          412
+        ],
+        "pixelRatio": 1.6,
+        "error": 0,
+        "resizeEvents": 0,
+        "effects": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "s": 423,
+        "mode": "stable",
+        "warning": "⚠ Virage à gauche · 28 m",
+        "warningBounds": [
+          191.375,
+          27
+        ],
+        "blackFraction": 0.02601847475476173,
+        "rightBlackFraction": 0.02431242462048164,
+        "hdr": {
+          "nonFinite": 0,
+          "error": 0,
+          "status": 36053
+        },
+        "viewport": [
+          0,
+          0,
+          1464,
+          659
+        ],
+        "scissor": [
+          0,
+          0,
+          480,
+          240
+        ],
+        "scissorEnabled": false,
+        "defaultFramebuffer": true,
+        "framebufferStatus": 36053,
+        "dimensions": [
+          1464,
+          659
+        ],
+        "cssDimensions": [
+          915,
+          412
+        ],
+        "pixelRatio": 1.6,
+        "error": 0,
+        "resizeEvents": 0,
+        "effects": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "s": 78,
+        "mode": "stable",
+        "warning": "⚠ Rétrécissement · 12 m",
+        "warningBounds": [
+          186.4375,
+          27
+        ],
+        "blackFraction": 0.02089293266001642,
+        "rightBlackFraction": 0.01839415937176296,
+        "hdr": {
+          "nonFinite": 0,
+          "error": 0,
+          "status": 36053
+        },
+        "viewport": [
+          0,
+          0,
+          1464,
+          659
+        ],
+        "scissor": [
+          0,
+          0,
+          480,
+          240
+        ],
+        "scissorEnabled": false,
+        "defaultFramebuffer": true,
+        "framebufferStatus": 36053,
+        "dimensions": [
+          1464,
+          659
+        ],
+        "cssDimensions": [
+          915,
+          412
+        ],
+        "pixelRatio": 1.6,
+        "error": 0,
+        "resizeEvents": 0,
+        "effects": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "s": 93,
+        "mode": "stable",
+        "warning": "",
+        "warningBounds": [
+          0,
+          0
+        ],
+        "blackFraction": 0.020593381261557086,
+        "rightBlackFraction": 0.015579298734350641,
+        "hdr": {
+          "nonFinite": 0,
+          "error": 0,
+          "status": 36053
+        },
+        "viewport": [
+          0,
+          0,
+          1464,
+          659
+        ],
+        "scissor": [
+          0,
+          0,
+          480,
+          240
+        ],
+        "scissorEnabled": false,
+        "defaultFramebuffer": true,
+        "framebufferStatus": 36053,
+        "dimensions": [
+          1464,
+          659
+        ],
+        "cssDimensions": [
+          915,
+          412
+        ],
+        "pixelRatio": 1.6,
+        "error": 0,
+        "resizeEvents": 0,
+        "effects": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "s": 498,
+        "mode": "stable",
+        "warning": "⚠ Rétrécissement · 13 m",
+        "warningBounds": [
+          186.4375,
+          27
+        ],
+        "blackFraction": 0.01682877683524466,
+        "rightBlackFraction": 0.015463050802422109,
+        "hdr": {
+          "nonFinite": 0,
+          "error": 0,
+          "status": 36053
+        },
+        "viewport": [
+          0,
+          0,
+          1464,
+          659
+        ],
+        "scissor": [
+          0,
+          0,
+          480,
+          240
+        ],
+        "scissorEnabled": false,
+        "defaultFramebuffer": true,
+        "framebufferStatus": 36053,
+        "dimensions": [
+          1464,
+          659
+        ],
+        "cssDimensions": [
+          915,
+          412
+        ],
+        "pixelRatio": 1.6,
+        "error": 0,
+        "resizeEvents": 0,
+        "effects": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "s": 513,
+        "mode": "stable",
+        "warning": "",
+        "warningBounds": [
+          0,
+          0
+        ],
+        "blackFraction": 0.01107821919284891,
+        "rightBlackFraction": 0.009995246289926494,
+        "hdr": {
+          "nonFinite": 0,
+          "error": 0,
+          "status": 36053
+        },
+        "viewport": [
+          0,
+          0,
+          1464,
+          659
+        ],
+        "scissor": [
+          0,
+          0,
+          480,
+          240
+        ],
+        "scissorEnabled": false,
+        "defaultFramebuffer": true,
+        "framebufferStatus": 36053,
+        "dimensions": [
+          1464,
+          659
+        ],
+        "cssDimensions": [
+          915,
+          412
+        ],
+        "pixelRatio": 1.6,
+        "error": 0,
+        "resizeEvents": 0,
+        "effects": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "s": 738,
+        "mode": "stable",
+        "warning": "⚠ Rétrécissement · 14 m",
+        "warningBounds": [
+          186.4375,
+          27
+        ],
+        "blackFraction": 0.012095035531563804,
+        "rightBlackFraction": 0.01239908745373436,
+        "hdr": {
+          "nonFinite": 0,
+          "error": 0,
+          "status": 36053
+        },
+        "viewport": [
+          0,
+          0,
+          1464,
+          659
+        ],
+        "scissor": [
+          0,
+          0,
+          480,
+          240
+        ],
+        "scissorEnabled": false,
+        "defaultFramebuffer": true,
+        "framebufferStatus": 36053,
+        "dimensions": [
+          1464,
+          659
+        ],
+        "cssDimensions": [
+          915,
+          412
+        ],
+        "pixelRatio": 1.6,
+        "error": 0,
+        "resizeEvents": 0,
+        "effects": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "s": 753,
+        "mode": "stable",
+        "warning": "",
+        "warningBounds": [
+          0,
+          0
+        ],
+        "blackFraction": 0.016987362869723126,
+        "rightBlackFraction": 0.022012376253038535,
+        "hdr": {
+          "nonFinite": 0,
+          "error": 0,
+          "status": 36053
+        },
+        "viewport": [
+          0,
+          0,
+          1464,
+          659
+        ],
+        "scissor": [
+          0,
+          0,
+          480,
+          240
+        ],
+        "scissorEnabled": false,
+        "defaultFramebuffer": true,
+        "framebufferStatus": 36053,
+        "dimensions": [
+          1464,
+          659
+        ],
+        "cssDimensions": [
+          915,
+          412
+        ],
+        "pixelRatio": 1.6,
+        "error": 0,
+        "resizeEvents": 0,
+        "effects": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "s": 360,
+        "mode": "down",
+        "warning": "⚠ Forte descente · 1 m",
+        "warningBounds": [
+          174.296875,
+          27
+        ],
+        "blackFraction": 0.005352242884269912,
+        "rightBlackFraction": 0.0021143328703157917,
+        "hdr": {
+          "nonFinite": 0,
+          "error": 0,
+          "status": 36053
+        },
+        "viewport": [
+          0,
+          0,
+          1317,
+          593
+        ],
+        "scissor": [
+          0,
+          0,
+          432,
+          216
+        ],
+        "scissorEnabled": false,
+        "defaultFramebuffer": true,
+        "framebufferStatus": 36053,
+        "dimensions": [
+          1317,
+          593
+        ],
+        "cssDimensions": [
+          915,
+          412
+        ],
+        "pixelRatio": 1.4400000000000002,
+        "error": 0,
+        "resizeEvents": 0,
+        "effects": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "s": 408,
+        "mode": "down",
+        "warning": "⚠ Rétrécissement · 13 m",
+        "warningBounds": [
+          186.4375,
+          27
+        ],
+        "blackFraction": 0.018575355866531966,
+        "rightBlackFraction": 0.019295529915887993,
+        "hdr": {
+          "nonFinite": 0,
+          "error": 0,
+          "status": 36053
+        },
+        "viewport": [
+          0,
+          0,
+          1317,
+          593
+        ],
+        "scissor": [
+          0,
+          0,
+          432,
+          216
+        ],
+        "scissorEnabled": false,
+        "defaultFramebuffer": true,
+        "framebufferStatus": 36053,
+        "dimensions": [
+          1317,
+          593
+        ],
+        "cssDimensions": [
+          915,
+          412
+        ],
+        "pixelRatio": 1.4400000000000002,
+        "error": 0,
+        "resizeEvents": 0,
+        "effects": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "s": 423,
+        "mode": "down",
+        "warning": "⚠ Virage à gauche · 28 m",
+        "warningBounds": [
+          191.375,
+          27
+        ],
+        "blackFraction": 0.026491041395373255,
+        "rightBlackFraction": 0.024751790135163532,
+        "hdr": {
+          "nonFinite": 0,
+          "error": 0,
+          "status": 36053
+        },
+        "viewport": [
+          0,
+          0,
+          1317,
+          593
+        ],
+        "scissor": [
+          0,
+          0,
+          432,
+          216
+        ],
+        "scissorEnabled": false,
+        "defaultFramebuffer": true,
+        "framebufferStatus": 36053,
+        "dimensions": [
+          1317,
+          593
+        ],
+        "cssDimensions": [
+          915,
+          412
+        ],
+        "pixelRatio": 1.4400000000000002,
+        "error": 0,
+        "resizeEvents": 0,
+        "effects": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "s": 360,
+        "mode": "up",
+        "warning": "⚠ Forte descente · 1 m",
+        "warningBounds": [
+          174.296875,
+          27
+        ],
+        "blackFraction": 0.005568801922520036,
+        "rightBlackFraction": 0.002472453034682081,
+        "hdr": {
+          "nonFinite": 0,
+          "error": 0,
+          "status": 36053
+        },
+        "viewport": [
+          0,
+          0,
+          1537,
+          692
+        ],
+        "scissor": [
+          0,
+          0,
+          504,
+          252
+        ],
+        "scissorEnabled": false,
+        "defaultFramebuffer": true,
+        "framebufferStatus": 36053,
+        "dimensions": [
+          1537,
+          692
+        ],
+        "cssDimensions": [
+          915,
+          412
+        ],
+        "pixelRatio": 1.6800000000000002,
+        "error": 0,
+        "resizeEvents": 0,
+        "effects": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "s": 408,
+        "mode": "up",
+        "warning": "⚠ Rétrécissement · 13 m",
+        "warningBounds": [
+          186.4375,
+          27
+        ],
+        "blackFraction": 0.018803990959041148,
+        "rightBlackFraction": 0.019294165462427744,
+        "hdr": {
+          "nonFinite": 0,
+          "error": 0,
+          "status": 36053
+        },
+        "viewport": [
+          0,
+          0,
+          1537,
+          692
+        ],
+        "scissor": [
+          0,
+          0,
+          504,
+          252
+        ],
+        "scissorEnabled": false,
+        "defaultFramebuffer": true,
+        "framebufferStatus": 36053,
+        "dimensions": [
+          1537,
+          692
+        ],
+        "cssDimensions": [
+          915,
+          412
+        ],
+        "pixelRatio": 1.6800000000000002,
+        "error": 0,
+        "resizeEvents": 0,
+        "effects": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "s": 423,
+        "mode": "up",
+        "warning": "⚠ Virage à gauche · 28 m",
+        "warningBounds": [
+          191.375,
+          27
+        ],
+        "blackFraction": 0.02698560742531995,
+        "rightBlackFraction": 0.025317241690751446,
+        "hdr": {
+          "nonFinite": 0,
+          "error": 0,
+          "status": 36053
+        },
+        "viewport": [
+          0,
+          0,
+          1537,
+          692
+        ],
+        "scissor": [
+          0,
+          0,
+          504,
+          252
+        ],
+        "scissorEnabled": false,
+        "defaultFramebuffer": true,
+        "framebufferStatus": 36053,
+        "dimensions": [
+          1537,
+          692
+        ],
+        "cssDimensions": [
+          915,
+          412
+        ],
+        "pixelRatio": 1.6800000000000002,
+        "error": 0,
+        "resizeEvents": 0,
+        "effects": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      }
+    ],
+    "pageErrors": [],
+    "failedRequests": [],
+    "result": "PASS"
+  }
+}

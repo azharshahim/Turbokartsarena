@@ -17,6 +17,8 @@ export class Showroom {
   private floor: T.Mesh;
   private canvas: HTMLCanvasElement | null;
   private angle = -0.5;
+  private width = 0;
+  private height = 0;
   private backdrop?: CinematicScenery;
   private circuitId = '';
   private mirror: Reflector;
@@ -97,7 +99,10 @@ export class Showroom {
     );
     this.floor.position.y = -0.09;
     this.scene.add(this.floor);
-    this.mirror = new Reflector(new T.CircleGeometry(1.97, 48), { textureWidth: 512, textureHeight: 512, color: 0x788da6, clipBias: .003 });
+    this.mirror = new Reflector(new T.CircleGeometry(1.97, 48), { textureWidth: 512, textureHeight: 512, color: 0x788da6, clipBias: .003, multisample: 0 });
+    // The reflection does not need HDR storage. RGBA8 is renderable on every
+    // WebGL2 device; half-float + MSAA (Reflector defaults) fails on mobile GPUs.
+    this.mirror.getRenderTarget().texture.type = T.UnsignedByteType;
     this.mirror.rotation.x = -Math.PI / 2;
     this.mirror.position.y = -.025;
     this.scene.add(this.mirror);
@@ -127,9 +132,16 @@ export class Showroom {
     this.scene.add(this.model.root);
   }
   frame(time: number, width: number, height: number) {
-    this.renderer.setSize(Math.max(1, width), Math.max(1, height), false);
-    this.camera.aspect = width / Math.max(1, height);
-    this.camera.updateProjectionMatrix();
+    // Hidden/rotating layouts can transiently measure zero. Keep the last valid
+    // drawing buffer instead of allocating 1px or projecting an invalid aspect.
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1 || this.renderer.getContext().isContextLost()) return;
+    width = Math.floor(width); height = Math.floor(height);
+    if (width !== this.width || height !== this.height) {
+      this.width = width; this.height = height;
+      this.renderer.setSize(width, height, false);
+      this.camera.aspect = width / height;
+      this.camera.updateProjectionMatrix();
+    }
     if (this.lastTime && !this.dragging && !this.reducedMotion) this.angle += Math.min(0.05, (time - this.lastTime) / 1000) * 0.35;
     this.lastTime = time;
     this.backdrop?.update(time / 1000, { x: 0, y: 0, z: 0 }, this.reducedMotion);
