@@ -24,7 +24,7 @@ Documents liés :
 | Dérapage | bouton bleu, turbo automatique | bouton DÉRAPAGE à **anneau de palier**, mini-turbo de **maîtrise**, sortie stabilisée |
 | Turbo | automatique, jauge passive | **bouton TURBO** avec état PRÊT / % / ACTIF / RECHARGE + flash de palier + jauge de maîtrise |
 | Gyroscope | débit de rotation, gain fixe, aucun repli | **orientation** (gravité projetée), 3 sensibilités, zone morte, filtrage, calibration, **repli automatique** |
-| Version | `3.0.0-dev` + « V4 » en dur | `4.1.0-dev` centralisé, badge `V4.1.0-dev · Build 2bd9c14` |
+| Version | `3.0.0-dev` + « V4 » en dur | `4.1.0-dev` centralisé, badge `V4.1.0-dev · Build <commit compilé>` |
 | HUD | plat, `bottom: 6px` | cluster haut lisible, safe-areas Android, vitesse centrée, pause 48 px |
 
 Aucun circuit, véhicule, pilote ou contenu n'a été supprimé (12 circuits,
@@ -239,7 +239,7 @@ garage et des Turbo Coins ne sont **jamais** touchées.
 | `VERSION_LABEL` | `V4.1.0-dev` |
 | `IS_DEV_BUILD` | `true` |
 | `BUILD_FALLBACK_ID` | `sans-git` |
-| `versionBadge()` | `V4.1.0-dev · Build 2bd9c14` |
+| `versionBadge()` | `V4.1.0-dev · Build <commit compilé>` (voir mission nº12) |
 
 - Le build est **dérivé du commit Git** : `tools/build-preview.mjs` lit
   `TKA_GIT_COMMIT` (CI) sinon `git rev-parse --short=7 HEAD`, et l'injecte via
@@ -251,10 +251,15 @@ garage et des Turbo Coins ne sont **jamais** touchées.
 
 ### 5.2 Où c'est affiché
 
-1. **Menu principal**, en bas, discret : `V4.1.0-dev · Build 2bd9c14`.
+1. **Menu principal**, en bas, discret : `V4.1.0-dev · Build <commit compilé>`.
 2. **Diagnostics techniques** : la pause affiche `versionDiagnostics()`
    (version, canal, commit, hôte, FPS, qualité, particules, gyroscope, réglages).
 3. Le rapport de builds (`preview:build`) journalise la même ligne.
+
+> **Mise à jour mission nº12** — le build affiché désigne désormais le commit qui
+> contient réellement le code compilé, avec un suffixe `+local` pour les builds
+> faits sur des sources non commitées et un marqueur `<meta name="tka-build">` dans
+> le HTML livré. Voir [MISSION-12-AUDIT-V4.1.md](MISSION-12-AUDIT-V4.1.md) §3.1.
 
 ### 5.3 Distinction développement / public
 

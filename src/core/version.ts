@@ -120,7 +120,7 @@ export function isFallbackBuild(commit?: string | null): boolean {
   return resolveBuildCommit(commit) === null;
 }
 
-/** « V4.1.0-dev · Build 2bd9c14 » */
+/** « V4.1.0-dev · Build 02b21af » (commit réellement compilé) */
 export function versionBadge(commit?: string | null): string {
   return `${VERSION_LABEL} · Build ${buildId(commit)}`;
 }
