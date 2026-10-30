@@ -409,6 +409,7 @@ export function createRoadside(track: Track, circuit: Circuit, q: QualitySetting
       }
     },
     dispose() {
+      traffic?.dispose();
       for (const g of geos) g.dispose();
       for (const m of mats) m.dispose();
     },

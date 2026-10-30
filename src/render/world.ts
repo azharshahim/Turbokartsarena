@@ -108,6 +108,8 @@ export class PhysicsEngine {
   private lastTime = 0;
   private elapsed = 0;
   private disposeFns: Array<() => void> = [];
+  private environmentTarget?: THREE.WebGLRenderTarget;
+  private contextResourcesReleased = false;
   private terrain: THREE.Mesh | null = null;
 
   /* résolution dynamique */
@@ -183,20 +185,7 @@ export class PhysicsEngine {
     this.scene.add(this.sky.mesh);
 
     /* environnement PBR préconvolué (reflets réalistes sans fichier HDR) */
-    const pmrem = new THREE.PMREMGenerator(this.renderer);
-    pmrem.compileCubemapShader();
-    const env = buildEnvironment(
-      this.renderer,
-      this.theme,
-      pmrem,
-      this.quality.level === 'ultra' ? 256 : 128,
-    );
-    this.scene.environment = env.texture;
-    this.scene.environmentIntensity = this.theme.mood === 'night' ? 0.4 : 0.45;
-    this.disposeFns.push(() => {
-      env.texture.dispose();
-      pmrem.dispose();
-    });
+    this.restoreContextResources();
 
     /* ---------------- lumières ---------------- */
     this.hemi = new THREE.HemisphereLight(
@@ -409,6 +398,43 @@ export class PhysicsEngine {
 
   get player() {
     return this.race.player;
+  }
+
+  /** Detach GPU-only targets while the context is lost. Old-context framebuffer
+   * handles must not be deleted/reused after the browser creates a new epoch. */
+  releaseContextResources() {
+    if (!this.renderer.getContext().isContextLost() || this.contextResourcesReleased) return;
+    this.environmentTarget?.dispose();
+    this.environmentTarget = undefined;
+    this.scene.environment = null;
+    this.postfx.dispose();
+    this.sun.shadow.dispose();
+    this.sun.shadow.map = null;
+    this.sun.shadow.mapPass = null;
+    this.contextResourcesReleased = true;
+  }
+
+  /** Called only at construction / after a real context-restored event.
+   * GPU-generated PMREM contents cannot be re-uploaded from CPU image data. */
+  restoreContextResources() {
+    if (this.renderer.getContext().isContextLost()) throw new Error('Le contexte graphique n’est pas rétabli.');
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    let target: THREE.WebGLRenderTarget;
+    try {
+      target = buildEnvironment(this.renderer, this.theme, pmrem, this.quality.level === 'ultra' ? 256 : 128);
+    } finally {
+      // Scratch targets/materials are not needed throughout the race.
+      pmrem.dispose();
+    }
+    this.environmentTarget?.dispose();
+    this.environmentTarget = target;
+    this.scene.environment = target.texture;
+    this.scene.environmentIntensity = this.theme.mood === 'night' ? 0.4 : 0.45;
+    if (this.contextResourcesReleased) {
+      this.postfx = createPostFX(this.renderer, this.scene, this.camera, this.quality);
+      this.postfx.setSize(this.width, this.height, this.currentPixelRatio);
+      this.contextResourcesReleased = false;
+    }
   }
 
   /** Réinitialise l'horloge de rendu après une suspension, sans toucher à la course. */
@@ -757,7 +783,11 @@ export class PhysicsEngine {
   private resetCombat() {
     for (let i = 0; i < this.combat.length; i++) this.combat[i] = makeRacer();
     this.gifts = spawnGifts(12, this.circuit.seed);
-    for (const pr of this.projectiles) this.scene.remove(pr.mesh);
+    for (const pr of this.projectiles) {
+      this.scene.remove(pr.mesh);
+      pr.mesh.geometry.dispose();
+      (pr.mesh.material as THREE.Material).dispose();
+    }
     this.projectiles = [];
     this.combatEvent = '';
   }
@@ -894,6 +924,8 @@ export class PhysicsEngine {
     this.materials.dispose();
     this.sky.dispose();
     this.postfx.dispose();
+    this.environmentTarget?.dispose();
+    this.sun.shadow.dispose();
     this.renderer.dispose();
     if (!this.isNative) this.renderer.forceContextLoss();
     void smoothstep;

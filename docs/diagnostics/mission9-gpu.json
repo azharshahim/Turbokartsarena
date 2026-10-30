@@ -1,0 +1,1172 @@
+{
+  "baselineCommit": "0fd8e39a3b3dc51d4a2e35d83e0b682ae15b79d6",
+  "physicalSamsung": false,
+  "driver": "Chromium 131 / SwiftShader",
+  "settings": {
+    "viewport": [
+      798,
+      339
+    ],
+    "dpr": 2.8125,
+    "quality": "high",
+    "touch": true,
+    "userAgentEmulatesReportedSamsung": true
+  },
+  "measurementLimit": "Estimated texture/renderbuffer storage only: not physical VRAM, excludes vertex buffers, driver overhead, swap chain and some mip allocations. Baseline handle counters after loss are excluded: original probe did not reset its epoch. Three memory counters remain valid.",
+  "baseline": {
+    "wallSoakSeconds": 20,
+    "initial": {
+      "label": "race-start",
+      "wallMs": 8409.600000000006,
+      "race": {
+        "time": 0.06666666666666667,
+        "phase": "racing",
+        "memory": {
+          "geometries": 246,
+          "textures": 36
+        },
+        "ratio": 1.8,
+        "dimensions": [
+          1436,
+          610
+        ],
+        "lost": false,
+        "projectiles": 0,
+        "environmentUploaded": true
+      },
+      "activeContexts": 1,
+      "liveHandles": {
+        "Texture": 40,
+        "Renderbuffer": 14,
+        "Framebuffer": 16,
+        "Buffer": 975,
+        "Program": 37,
+        "Shader": 2
+      },
+      "estimatedTextureRenderbufferBytes": 58791142.239999995
+    },
+    "disposalThreeMemory": [
+      {
+        "geometries": 0,
+        "textures": 18
+      },
+      {
+        "geometries": 0,
+        "textures": 19
+      },
+      {
+        "geometries": 0,
+        "textures": 19
+      }
+    ],
+    "projectileResetBufferDelta": 0,
+    "environmentUploadedAfterRealRestoration": false,
+    "highDprResizeAllocationDeltas": [
+      {
+        "Texture": 13,
+        "Renderbuffer": 13,
+        "Framebuffer": 13
+      },
+      {
+        "Texture": 13,
+        "Renderbuffer": 13,
+        "Framebuffer": 13
+      },
+      {
+        "Texture": 13,
+        "Renderbuffer": 13,
+        "Framebuffer": 13
+      }
+    ]
+  },
+  "corrected": {
+    "wallSoakSeconds": 180,
+    "samples": [
+      {
+        "label": "garage",
+        "wallMs": 910,
+        "race": null,
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 5,
+          "Renderbuffer": 1,
+          "Framebuffer": 1,
+          "Buffer": 131,
+          "Program": 8,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 2097180
+      },
+      {
+        "label": "race-start",
+        "wallMs": 9126.70000000007,
+        "race": {
+          "time": 0.06666666666666667,
+          "phase": "racing",
+          "memory": {
+            "geometries": 236,
+            "textures": 35
+          },
+          "ratio": 1.8,
+          "dimensions": [
+            1436,
+            610
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 945,
+          "Program": 34,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 56222918.239999995
+      },
+      {
+        "label": "race-15s",
+        "wallMs": 24137,
+        "race": {
+          "time": 0.5000000000000007,
+          "phase": "racing",
+          "memory": {
+            "geometries": 236,
+            "textures": 35
+          },
+          "ratio": 1.62,
+          "dimensions": [
+            1292,
+            549
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 945,
+          "Program": 34,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 52224219.494399995
+      },
+      {
+        "label": "race-30s",
+        "wallMs": 39144,
+        "race": {
+          "time": 0.9833333333333323,
+          "phase": "racing",
+          "memory": {
+            "geometries": 236,
+            "textures": 35
+          },
+          "ratio": 1.4580000000000002,
+          "dimensions": [
+            1163,
+            494
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 945,
+          "Program": 34,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 48988507.430464
+      },
+      {
+        "label": "race-45s",
+        "wallMs": 54153,
+        "race": {
+          "time": 1.6249999999999967,
+          "phase": "racing",
+          "memory": {
+            "geometries": 236,
+            "textures": 35
+          },
+          "ratio": 1.1809800000000004,
+          "dimensions": [
+            942,
+            400
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 945,
+          "Program": 34,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 44242834.047127426
+      },
+      {
+        "label": "race-60s",
+        "wallMs": 69158.59999999998,
+        "race": {
+          "time": 2.2749999999999946,
+          "phase": "racing",
+          "memory": {
+            "geometries": 236,
+            "textures": 35
+          },
+          "ratio": 0.9565938000000003,
+          "dimensions": [
+            763,
+            324
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 945,
+          "Program": 34,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 40956756.207520306
+      },
+      {
+        "label": "race-75s",
+        "wallMs": 84780.09999999998,
+        "race": {
+          "time": 3.224999999999991,
+          "phase": "racing",
+          "memory": {
+            "geometries": 236,
+            "textures": 35
+          },
+          "ratio": 0.6973568802000003,
+          "dimensions": [
+            556,
+            236
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 945,
+          "Program": 34,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 37319633.112100795
+      },
+      {
+        "label": "race-91s",
+        "wallMs": 99791.20000000007,
+        "race": {
+          "time": 5.258333333333384,
+          "phase": "racing",
+          "memory": {
+            "geometries": 236,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 945,
+          "Program": 34,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "race-106s",
+        "wallMs": 114853.09999999998,
+        "race": {
+          "time": 7.258333333333484,
+          "phase": "racing",
+          "memory": {
+            "geometries": 236,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 945,
+          "Program": 35,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "race-121s",
+        "wallMs": 129865.20000000007,
+        "race": {
+          "time": 9.400000000000107,
+          "phase": "racing",
+          "memory": {
+            "geometries": 252,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1009,
+          "Program": 35,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "race-136s",
+        "wallMs": 144874.59999999998,
+        "race": {
+          "time": 11.533333333333319,
+          "phase": "racing",
+          "memory": {
+            "geometries": 265,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1061,
+          "Program": 35,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "race-151s",
+        "wallMs": 159886.40000000002,
+        "race": {
+          "time": 13.666666666666531,
+          "phase": "racing",
+          "memory": {
+            "geometries": 283,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1133,
+          "Program": 35,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "race-166s",
+        "wallMs": 174891.09999999998,
+        "race": {
+          "time": 15.73333333333308,
+          "phase": "racing",
+          "memory": {
+            "geometries": 283,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1133,
+          "Program": 35,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "race-181s",
+        "wallMs": 189896.40000000002,
+        "race": {
+          "time": 17.73333333333297,
+          "phase": "racing",
+          "memory": {
+            "geometries": 283,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1133,
+          "Program": 35,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "simulation-10s",
+        "wallMs": 193241.09999999998,
+        "race": {
+          "time": 27.924999999999056,
+          "phase": "racing",
+          "memory": {
+            "geometries": 284,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1137,
+          "Program": 37,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "simulation-20s",
+        "wallMs": 193413.59999999998,
+        "race": {
+          "time": 37.92499999999849,
+          "phase": "racing",
+          "memory": {
+            "geometries": 290,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1161,
+          "Program": 37,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "simulation-30s",
+        "wallMs": 193538.29999999993,
+        "race": {
+          "time": 47.92499999999792,
+          "phase": "racing",
+          "memory": {
+            "geometries": 296,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1185,
+          "Program": 37,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "simulation-40s",
+        "wallMs": 193643.20000000007,
+        "race": {
+          "time": 57.924999999997354,
+          "phase": "racing",
+          "memory": {
+            "geometries": 306,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1225,
+          "Program": 37,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "simulation-50s",
+        "wallMs": 193737.29999999993,
+        "race": {
+          "time": 67.92500000000013,
+          "phase": "racing",
+          "memory": {
+            "geometries": 313,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1253,
+          "Program": 37,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "simulation-60s",
+        "wallMs": 193844.00000000012,
+        "race": {
+          "time": 77.92500000000808,
+          "phase": "racing",
+          "memory": {
+            "geometries": 313,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1253,
+          "Program": 37,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "simulation-70s",
+        "wallMs": 193892.00000000012,
+        "race": {
+          "time": 87.92500000001604,
+          "phase": "racing",
+          "memory": {
+            "geometries": 313,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1253,
+          "Program": 37,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "simulation-80s",
+        "wallMs": 193936.40000000002,
+        "race": {
+          "time": 97.925000000024,
+          "phase": "racing",
+          "memory": {
+            "geometries": 313,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1253,
+          "Program": 37,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "simulation-90s",
+        "wallMs": 194013.00000000012,
+        "race": {
+          "time": 107.92500000003196,
+          "phase": "racing",
+          "memory": {
+            "geometries": 313,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1253,
+          "Program": 37,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "simulation-100s",
+        "wallMs": 194105.40000000002,
+        "race": {
+          "time": 117.92500000003992,
+          "phase": "racing",
+          "memory": {
+            "geometries": 313,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1253,
+          "Program": 37,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "simulation-110s",
+        "wallMs": 194187.90000000002,
+        "race": {
+          "time": 127.92500000004787,
+          "phase": "racing",
+          "memory": {
+            "geometries": 313,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1253,
+          "Program": 37,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "simulation-120s",
+        "wallMs": 194301.70000000007,
+        "race": {
+          "time": 137.9250000000389,
+          "phase": "racing",
+          "memory": {
+            "geometries": 313,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1253,
+          "Program": 37,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "simulation-130s",
+        "wallMs": 194394.20000000007,
+        "race": {
+          "time": 147.9250000000298,
+          "phase": "racing",
+          "memory": {
+            "geometries": 313,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1253,
+          "Program": 37,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "simulation-140s",
+        "wallMs": 194452.29999999993,
+        "race": {
+          "time": 157.9250000000207,
+          "phase": "racing",
+          "memory": {
+            "geometries": 313,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1253,
+          "Program": 37,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "simulation-150s",
+        "wallMs": 194509.40000000002,
+        "race": {
+          "time": 167.9250000000116,
+          "phase": "racing",
+          "memory": {
+            "geometries": 314,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1257,
+          "Program": 37,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "simulation-160s",
+        "wallMs": 194566.09999999998,
+        "race": {
+          "time": 177.9250000000025,
+          "phase": "racing",
+          "memory": {
+            "geometries": 314,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1257,
+          "Program": 37,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "simulation-170s",
+        "wallMs": 194613.70000000007,
+        "race": {
+          "time": 187.92499999999342,
+          "phase": "racing",
+          "memory": {
+            "geometries": 314,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1257,
+          "Program": 37,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "simulation-180s",
+        "wallMs": 194676.00000000012,
+        "race": {
+          "time": 197.92499999998432,
+          "phase": "racing",
+          "memory": {
+            "geometries": 314,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1257,
+          "Program": 37,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "real-restoration",
+        "wallMs": 206122.40000000002,
+        "race": {
+          "time": 0.08333333333333333,
+          "phase": "racing",
+          "memory": {
+            "geometries": 262,
+            "textures": 35
+          },
+          "ratio": 0.62,
+          "dimensions": [
+            494,
+            210
+          ],
+          "lost": false,
+          "projectiles": 0,
+          "environmentUploaded": true
+        },
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 39,
+          "Renderbuffer": 3,
+          "Framebuffer": 15,
+          "Buffer": 1049,
+          "Program": 34,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 36459769.2544
+      },
+      {
+        "label": "garage-cycle-0",
+        "wallMs": 214681.50000000012,
+        "race": null,
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 5,
+          "Renderbuffer": 1,
+          "Framebuffer": 1,
+          "Buffer": 131,
+          "Program": 8,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 2097180
+      },
+      {
+        "label": "garage-cycle-1",
+        "wallMs": 222379.79999999993,
+        "race": null,
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 5,
+          "Renderbuffer": 1,
+          "Framebuffer": 1,
+          "Buffer": 131,
+          "Program": 8,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 2097180
+      },
+      {
+        "label": "garage-cycle-2",
+        "wallMs": 229841.90000000002,
+        "race": null,
+        "activeContexts": 1,
+        "liveHandles": {
+          "Texture": 5,
+          "Renderbuffer": 1,
+          "Framebuffer": 1,
+          "Buffer": 131,
+          "Program": 8,
+          "Shader": 0
+        },
+        "estimatedTextureRenderbufferBytes": 2097180
+      }
+    ],
+    "disposalThreeMemory": [
+      {
+        "geometries": 0,
+        "textures": 0
+      },
+      {
+        "geometries": 0,
+        "textures": 0
+      },
+      {
+        "geometries": 0,
+        "textures": 0
+      }
+    ],
+    "disposalHandles": [
+      {
+        "Texture": 4,
+        "Renderbuffer": 0,
+        "Framebuffer": 0,
+        "Buffer": 0,
+        "Program": 4,
+        "Shader": 0
+      },
+      {
+        "Texture": 4,
+        "Renderbuffer": 0,
+        "Framebuffer": 0,
+        "Buffer": 0,
+        "Program": 2,
+        "Shader": 0
+      },
+      {
+        "Texture": 4,
+        "Renderbuffer": 0,
+        "Framebuffer": 0,
+        "Buffer": 0,
+        "Program": 2,
+        "Shader": 0
+      }
+    ],
+    "projectileResetBufferDelta": -4,
+    "environmentReadbackAfterRealRestoration": {
+      "invalid": 0,
+      "lit": 139776,
+      "error": 0
+    },
+    "highDprResizeAllocationDeltasFromShortCheck": [
+      {
+        "Texture": 2,
+        "Renderbuffer": 2,
+        "Framebuffer": 2
+      },
+      {
+        "Texture": 2,
+        "Renderbuffer": 2,
+        "Framebuffer": 2
+      },
+      {
+        "Texture": 2,
+        "Renderbuffer": 2,
+        "Framebuffer": 2
+      }
+    ],
+    "result": "PASS",
+    "pageErrors": []
+  }
+}

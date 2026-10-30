@@ -174,6 +174,12 @@ export function createPostFX(
       0.72, // rayon
       0.82, // seuil : seules les zones HDR (soleil, néons, étincelles) débordent
     );
+    // Fullscreen bloom never uses depth; avoid eleven unused depth buffers.
+    for (const target of [bloomPass.renderTargetBright, ...bloomPass.renderTargetsHorizontal, ...bloomPass.renderTargetsVertical]) target.depthBuffer = false;
+    // Preserve the existing CSS-sized bloom budget at DPR > 1, but let the
+    // composer size it ONCE, not effective-size then CSS-size on every change.
+    const resizeBloom = bloomPass.setSize.bind(bloomPass);
+    bloomPass.setSize = (w, h) => resizeBloom(Math.min(w, size.x), Math.min(h, size.y));
     composer.addPass(bloomPass);
   }
 
@@ -198,17 +204,22 @@ export function createPostFX(
     composer.addPass(fxaaPass);
   }
 
+  let widthNow = size.x, heightNow = size.y, ratioNow = NaN;
   const setSize = (width: number, height: number, pixelRatio: number) => {
-    composer.setPixelRatio(pixelRatio);
-    composer.setSize(width, height);
-    speedPass.uniforms.uResolution.value.set(width * pixelRatio, height * pixelRatio);
-    if (fxaaPass) {
-      const pr = pixelRatio;
-      fxaaPass.material.uniforms.resolution.value.set(1 / (width * pr), 1 / (height * pr));
+    size.set(width, height);
+    if (width !== widthNow || height !== heightNow) {
+      composer.setSize(width, height);
+      widthNow = width; heightNow = height;
     }
-    if (bloomPass) bloomPass.setSize(width, height);
+    if (pixelRatio !== ratioNow) {
+      composer.setPixelRatio(pixelRatio);
+      ratioNow = pixelRatio;
+    }
+    speedPass.uniforms.uResolution.value.set(width * pixelRatio, height * pixelRatio);
+    if (fxaaPass) fxaaPass.material.uniforms.resolution.value.set(1 / (width * pixelRatio), 1 / (height * pixelRatio));
   };
 
+  let disposed = false;
   return {
     composer,
     speedPass,
@@ -219,6 +230,11 @@ export function createPostFX(
       composer.render(dt);
     },
     dispose() {
+      if (disposed) return;
+      disposed = true;
+      for (const pass of composer.passes) pass.dispose();
+      // Three r166 UnrealBloomPass.dispose omits this owned material.
+      bloomPass?.materialHighPassFilter.dispose();
       composer.dispose();
     },
   };

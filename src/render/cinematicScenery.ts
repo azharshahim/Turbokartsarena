@@ -178,5 +178,5 @@ export class CinematicScenery {
     for (const material of this.materials) if (material instanceof T.ShaderMaterial && material.uniforms.uOrigin) material.uniforms.uOrigin.value.set(player.x, player.y, player.z);
     for (const m of this.moving) { m.object.position.y = m.y + (reduced ? 0 : Math.sin(time * .6 + m.phase) * 1.5); if (m.object instanceof T.InstancedMesh) m.object.position.x = reduced ? 0 : Math.sin(time * .12) * 35; }
   }
-  dispose() { for (const g of this.geometries) g.dispose(); for (const m of this.materials) m.dispose(); }
+  dispose() { this.group.traverse(o => { if (o instanceof T.InstancedMesh) o.dispose(); }); for (const g of this.geometries) g.dispose(); for (const m of this.materials) m.dispose(); }
 }

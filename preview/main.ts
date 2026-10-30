@@ -71,20 +71,37 @@ function observeRenderer(renderer: WebGLRenderer, canvas: HTMLCanvasElement, own
     throw new Error(`Shader ${owner}: ${gl.getProgramInfoLog(program)} ${gl.getShaderInfoLog(vertex)} ${gl.getShaderInfoLog(fragment)}`);
   };
   const gl = renderer.getContext();
+  const gpuInfo = gl.getExtension('WEBGL_debug_renderer_info');
   boot?.note(`WebGL initialisé : ${owner}`, {
     maxTextureSize: renderer.capabilities.maxTextureSize,
     maxRenderbufferSize: gl.getParameter(gl.MAX_RENDERBUFFER_SIZE),
     colorBufferFloat: !!gl.getExtension('EXT_color_buffer_float'),
+    gpu: gpuInfo ? String(gl.getParameter(gpuInfo.UNMASKED_RENDERER_WEBGL)) : 'non exposé',
+    deviceMemoryGB: (navigator as any).deviceMemory ?? null,
   });
   const onLost = (event: Event) => {
     if (disposed) return;
     event.preventDefault(); lost = true;
+    boot?.note(`ressources lors de la perte : ${owner}`, {
+      drawingBuffer: [canvas.width, canvas.height], pixelRatio: renderer.getPixelRatio(),
+      ...renderer.info.memory, // Counts, NOT an estimate of physical GPU memory.
+    });
     renderFailure(new Error('Le contexte graphique a été perdu. Une restauration est en cours ; ne fermez pas cette page immédiatement.'), phase);
+    try {
+      if (owner === 'course' && engine) engine.releaseContextResources();
+    } catch (error) { renderFailure(error, `libération graphique : ${owner}`); }
   };
   const onRestored = () => {
     // Three.js restores its own GPU state in this event. Resume only afterwards.
     queueMicrotask(() => {
       if (disposed || !lost) return;
+      if (gl.isContextLost()) return;
+      try {
+        if (owner === 'course' && engine) engine.restoreContextResources();
+      } catch (error) {
+        renderFailure(error, `réinitialisation graphique : ${owner}`);
+        return;
+      }
       lost = false; boot?.note(`WebGL restauré : ${owner}`); boot?.recover(phase);
       if (owner === 'garage' && state.screen === 'menu' && !document.hidden && !garageRaf) garageRaf = requestAnimationFrame(garageFrame);
       if (owner === 'course' && engine) {

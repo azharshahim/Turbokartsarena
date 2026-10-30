@@ -29,7 +29,9 @@ export function buildTrackMesh(
   theme: { curbColors: [number, number]; id: string },
 ): TrackMesh {
   const group = new THREE.Group();
-  const disposables: Array<THREE.BufferGeometry | THREE.Material> = [];
+  const disposables: Array<THREE.BufferGeometry | THREE.Material | THREE.Texture> = [];
+  // Cached CPU pixels are retained; release this track's GPU registrations.
+  const ownTexture = (texture: THREE.Texture) => { disposables.push(texture); return texture; };
   const n = track.count;
   const step = track.step;
 
@@ -158,6 +160,7 @@ export function buildTrackMesh(
     if (slot < 0) {
       slot = surfaces.length; surfaces.push(surface);
       const maps = surface === 'asphalt' ? asphaltTexture(q.textureSize, q.anisotropy) : terrainTexture(surface, q.textureSize, q.anisotropy);
+      disposables.push(maps.albedo, maps.normal, maps.roughness);
       const material = new THREE.MeshStandardMaterial({ map: maps.albedo, normalMap: maps.normal, roughnessMap: maps.roughness, roughness: .9, vertexColors: true });
       material.userData.terrain = surface;
       roadMaterials.push(material); disposables.push(material);
@@ -214,6 +217,7 @@ export function buildTrackMesh(
 
   /* ---------------- lignes de rive ---------------- */
   const lineTex = lineTexture(q.textureSize);
+  disposables.push(lineTex.albedo, lineTex.normal, lineTex.roughness);
   const lineMat = new THREE.MeshStandardMaterial({
     map: lineTex.albedo,
     color: new THREE.Color(theme.id === 'neon' ? 0xfff3b0 : 0xf5f7ff),
@@ -259,7 +263,7 @@ export function buildTrackMesh(
   /* ---------------- plaque de départ (damier) ---------------- */
   const startGeo = checkerBand(track, 0, 6);
   const startMat = new THREE.MeshStandardMaterial({
-    map: makeCheckerTexture(q.textureSize),
+    map: ownTexture(makeCheckerTexture(q.textureSize)),
     roughness: 0.55,
     metalness: 0.05,
     polygonOffset: true,
@@ -279,7 +283,7 @@ export function buildTrackMesh(
     const geo = new THREE.PlaneGeometry(w, len, 1, 4);
     disposables.push(geo);
     const mat = new THREE.MeshStandardMaterial({
-      map: makeBoostTexture(q.textureSize, theme.id === 'neon' ? 0x35f5c8 : 0x40c8ff),
+      map: ownTexture(makeBoostTexture(q.textureSize, theme.id === 'neon' ? 0x35f5c8 : 0x40c8ff)),
       emissiveMap: null,
       emissive: new THREE.Color(theme.id === 'neon' ? 0x35f5c8 : 0x40c8ff),
       emissiveIntensity: 2.2,
@@ -419,7 +423,8 @@ export function buildTrackMesh(
       }
     },
     dispose() {
-      for (const d of disposables) d.dispose();
+      group.traverse(o => { if (o instanceof THREE.InstancedMesh) o.dispose(); });
+      for (const d of new Set(disposables)) d.dispose();
     },
   };
 }
