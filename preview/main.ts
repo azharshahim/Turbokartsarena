@@ -10,6 +10,13 @@ import { PhysicsEngine } from '../src/render/world';
 import { CIRCUITS } from '../src/game/circuits';
 import { Showroom } from '../src/render/showroom';
 import { VEHICLES, vehicleProfile, DIFFICULTIES, type Difficulty } from '../src/game/vehicles';
+import { awardRace, buyUpgrade, buyVehicle, loadGarage, saveGarage, upgradeCost, upgradeMultiplier, UPGRADE_KINDS, type GarageState, type UpgradeKind, upgradedProfile } from '../src/game/economy';
+
+const webStorage = { getItem: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } }, setItem: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* stockage indisponible */ } } };
+let garage: GarageState = loadGarage(webStorage);
+let upKind: UpgradeKind = 'engine';
+let raceAwardId = '';
+const persistGarage = () => saveGarage(webStorage, garage);
 import { ROSTER } from '../src/game/roster';
 import { autoQuality, QUALITY, type QualityLevel } from '../src/core/config';
 import { formatLap, formatTime } from '../src/core/race';
@@ -50,7 +57,7 @@ function garageFrame(time: number) {
 }
 function refreshGarage() {
   if (state.screen !== 'menu') return;
-  const profile = vehicleProfile(ROSTER[state.driverIndex], VEHICLES[state.vehicleIndex]);
+  const profile = upgradedProfile(vehicleProfile(ROSTER[state.driverIndex], VEHICLES[state.vehicleIndex]), garage);
   if (showroom) showroom.select(profile);
   else {
     const canvas = $('garageCanvas');
@@ -133,7 +140,7 @@ function startEngine() {
     pixelRatio: pr,
     quality: QUALITY[level],
     circuit: CIRCUITS[state.circuitIndex],
-    profile: vehicleProfile(ROSTER[state.driverIndex], VEHICLES[state.vehicleIndex]),
+    profile: upgradedProfile(vehicleProfile(ROSTER[state.driverIndex], VEHICLES[state.vehicleIndex]), garage),
     difficulty: state.difficulty,
     laps: state.laps,
     onFinish: () => {
@@ -209,6 +216,9 @@ function updateHud() {
   $('total').textContent = String(engine.race.karts.length);
   $('time').textContent = formatTime(engine.race.raceTime);
   $('best').textContent = st.bestLapTime ? `Meilleur tour ${formatLap(st.bestLapTime)}` : 'Meilleur tour —';
+  const ch = engine.combatHud;
+  $('fireLabel').textContent = ch.weapon ? `TIR · ${ch.weapon}` : 'TIR —';
+  $('hazardWarning').textContent = ch.event || $('hazardWarning').textContent;
 
   const fill = $('driftFill');
   const colors = ['#8ea2c8', '#40c8ff', '#ff9a2e', '#c65cff'];
@@ -307,11 +317,17 @@ function renderMenu() {
   const c = CIRCUITS[state.circuitIndex];
   const driver = ROSTER[state.driverIndex];
   const vehicle = VEHICLES[state.vehicleIndex];
-  const d = vehicleProfile(driver, vehicle);
+  const d = upgradedProfile(vehicleProfile(driver, vehicle), garage);
   $('vehicleName').textContent = vehicle.name;
   $('vehicleSub').textContent = vehicle.description;
   $('garageLabel').textContent = `${driver.name} · ${vehicle.name}`;
   $('difficultyToggle').textContent = `Difficulté : ${DIFFICULTIES[state.difficulty].name}`;
+  const ownedV = garage.owned.includes(vehicle.id);
+  $('garageCoins').textContent = `🪙 ${garage.coins} Turbo Coins${ownedV ? ' · ✓ possédé' : ` · prix ${vehicle.price ?? 0} TC`}`;
+  $('buyVehicleBtn').textContent = ownedV ? '✓ Véhicule possédé' : `Acheter ${vehicle.name} — ${vehicle.price ?? 0} TC`;
+  const lvl = garage.upgrades[vehicle.id]?.[upKind] ?? 0;
+  $('upgradeBtn').textContent = ownedV ? `⬆ ${upKind} niv.${lvl}/5 (×${upgradeMultiplier(garage, vehicle.id, upKind).toFixed(2)}) — ${lvl >= 5 ? 'MAX' : upgradeCost(upKind, lvl) + ' TC'}` : '⬆ Améliorations (achetez le véhicule)';
+  ($('playBtn') as HTMLButtonElement).style.opacity = ownedV ? '1' : '0.45';
   $('driftLabel').textContent = vehicle.kind === 'kart' ? 'DÉRAPAGE' : 'GLISSE / TURBO';
   $('driverName').style.color = '#' + driver.visorColor.toString(16).padStart(6, '0');
   refreshGarage();
@@ -364,6 +380,8 @@ function showMenu() {
 
 function startRace() {
   if (state.starting || state.screen === 'race') return;
+  if (!garage.owned.includes(VEHICLES[state.vehicleIndex].id)) { toast('Véhicule verrouillé — achetez-le dans le garage', '#ff3d6e'); state.starting = false; return; }
+  raceAwardId = `web-${Date.now()}`;
   state.starting = true;
   stopGarage();
   window.clearTimeout(startTimeout);
@@ -425,6 +443,9 @@ function showResults() {
         `<div class="resultsRow"><span class="label">TOUR ${i + 1}</span><b ${l === p.bestLapTime ? 'style="color:#ffe14d"' : ''}>${formatLap(l)}</b></div>`,
     ),
   ];
+  const gain = awardRace(garage, raceAwardId || `web-${Date.now()}`, p.place, engine.combatHud.coins, p.finishTime, CIRCUITS[state.circuitIndex].id);
+  persistGarage();
+  rows.push(`<div class="resultsRow"><span class="label">TURBO COINS</span><b style="color:#ffd21f">+${gain} · solde ${garage.coins}</b></div>`);
   $('resultCard').innerHTML = rows.join('');
   engine.dispose();
   engine = null;
@@ -460,6 +481,8 @@ bind('vehiclePrev', 'click', () => {
   state.vehicleIndex = (state.vehicleIndex + VEHICLES.length - 1) % VEHICLES.length;
   renderMenu();
 });
+bind('buyVehicleBtn', 'click', () => { const v = VEHICLES[state.vehicleIndex]; buyVehicle(garage, v.id, v.price ?? 0); persistGarage(); renderMenu(); });
+bind('upgradeBtn', 'click', () => { const v = VEHICLES[state.vehicleIndex]; if (!garage.owned.includes(v.id)) return; const cur = UPGRADE_KINDS.indexOf(upKind); if ((garage.upgrades[v.id]?.[upKind] ?? 0) >= 5) upKind = UPGRADE_KINDS[(cur + 1) % UPGRADE_KINDS.length]; else buyUpgrade(garage, v.id, upKind); persistGarage(); renderMenu(); });
 bind('vehicleNext', 'click', () => {
   state.vehicleIndex = (state.vehicleIndex + 1) % VEHICLES.length;
   renderMenu();
@@ -587,6 +610,7 @@ const hold = (id: string, action: TouchAction) => {
 hold('leftBtn', 'left');
 hold('rightBtn', 'right');
 hold('driftBtn', 'drift');
+$('fireBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); engine?.firePlayerWeapon(); });
 hold('brakeBtn', 'brake');
 
 window.addEventListener('pointerup', (e) => releasePointerTarget(e.pointerId));
@@ -609,6 +633,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (state.screen !== 'race' || state.paused || e.repeat) return;
+  if (e.key === 'f' || e.key === 'F') { engine?.firePlayerWeapon(); return; }
   if (e.key === ' ') e.preventDefault();
   keys.add(normalizeKey(e.key));
 });

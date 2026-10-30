@@ -1,4 +1,5 @@
 /** Phase 4 — Turbo Coins, garage, améliorations. Logique pure + persistance injectable. */
+import type { KartProfile } from './roster';
 export interface StorageLike { getItem(k: string): string | null; setItem(k: string, v: string): void }
 export type UpgradeKind = 'engine' | 'acceleration' | 'topSpeed' | 'braking' | 'grip' | 'protection' | 'turbo';
 export const UPGRADE_KINDS: UpgradeKind[] = ['engine','acceleration','topSpeed','braking','grip','protection','turbo'];
@@ -9,7 +10,8 @@ export interface GarageState {
   rewardedRaces: string[]; bestTimes: Record<string, number>;
   stats: { races: number; wins: number; coinsCollected: number };
 }
-const KEY = 'turbokarts.v3.garage.v1';
+export const GARAGE_STORAGE_KEY = 'turbokarts.v3.garage.v1';
+const KEY = GARAGE_STORAGE_KEY;
 export function defaultGarage(): GarageState {
   return { coins: 500, owned: ['apex','aerion'], selected: 'apex', upgrades: {}, rewardedRaces: [], bestTimes: {}, stats: { races: 0, wins: 0, coinsCollected: 0 } };
 }
@@ -50,4 +52,10 @@ export function loadGarage(storage: StorageLike): GarageState {
     if (typeof p.coins !== 'number' || !Array.isArray(p.owned)) return defaultGarage();
     return { ...defaultGarage(), ...p, coins: Math.max(0, Math.floor(p.coins)) };
   } catch { return defaultGarage(); }
+}
+
+/** Applique les améliorations achetées aux caractéristiques réelles du véhicule. */
+export function upgradedProfile(base: KartProfile, garage: GarageState): KartProfile {
+  const v = base.vehicleId ?? 'apex'; const m = (k: UpgradeKind) => upgradeMultiplier(garage, v, k);
+  return { ...base, speed: base.speed * m('engine') * m('topSpeed'), accel: base.accel * m('acceleration') * m('turbo'), grip: base.grip * m('grip'), brake: (base.brake ?? 1) * m('braking'), stability: (base.stability ?? 1) * m('protection') };
 }

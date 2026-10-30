@@ -176,6 +176,8 @@ export function vehicleProfile(driver: KartProfile, vehicle: Vehicle): KartProfi
     grip: vehicle.grip,
     handling: vehicle.handling,
     mass: vehicle.mass,
+    brake: vehicle.brake,
+    stability: vehicle.stability,
     shape: vehicle.shape,
   };
 }

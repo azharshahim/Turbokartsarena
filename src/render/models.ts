@@ -82,9 +82,9 @@ export function createMaterials(theme: CircuitTheme, q: QualitySettings): Materi
   curbMat.emissive = new THREE.Color(0xffffff);
   curbMat.emissiveIntensity = isCity ? 0.5 : 0.08;
   const groundMat = std(ground, 240, { roughness: 0.95, color: new THREE.Color(isCity ? 0xd8dcff : 0xf2f6ee) });
-  const paintMat = std(paint, 1, { roughness: 0.28, metalness: 0.55, envMapIntensity: 1.35 });
+  const paintMat = std(paint, 1, { roughness: 0.22, metalness: 0.65, envMapIntensity: 1.6 }); // V3 : carrosserie plus métallique/réfléchissante
   const metalMat = std(metal, 1, { roughness: 0.42, metalness: 0.9, envMapIntensity: 1.1 });
-  const rubber = new THREE.MeshStandardMaterial({ color: 0x14141a, roughness: 0.88, metalness: 0.02 });
+  const rubber = new THREE.MeshStandardMaterial({ color: 0x111116, roughness: 0.95, metalness: 0.02 }); // V3 : pneu plus mat/réaliste
   const glass = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     metalness: 1,

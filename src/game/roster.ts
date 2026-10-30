@@ -25,6 +25,8 @@ export interface KartProfile {
   grip: number;
   handling: number;
   mass: number;
+  brake?: number;
+  stability?: number;
   /** Archétype de carrosserie. */
   shape: 'compact' | 'muscle' | 'formula' | 'buggy' | 'rally' | 'hover';
 }

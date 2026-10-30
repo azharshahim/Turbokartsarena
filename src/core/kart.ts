@@ -191,8 +191,8 @@ export function effectiveStats(profile: KartProfile): EffectiveStats {
     turnRate: k.turnRate * profile.handling,
     driftGrip: k.gripDrift * profile.grip,
     mass: profile.mass,
-    brake: vehicleFor(profile)?.brake ?? 1,
-    stability: vehicleFor(profile)?.stability ?? 1,
+    brake: profile.brake ?? vehicleFor(profile)?.brake ?? 1,
+    stability: profile.stability ?? vehicleFor(profile)?.stability ?? 1,
     bike: !!vehicleFor(profile) && vehicleFor(profile)!.kind !== 'kart',
   };
 }

@@ -19,6 +19,7 @@
     "test:v3": "esbuild tools/tests-v3.ts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/tests-v3.cjs --log-level=error && node node_modules/.cache/tests-v3.cjs"
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "^1.24.0",
     "expo": "~51.0.28",
     "expo-asset": "~10.0.10",
     "expo-gl": "~14.0.2",

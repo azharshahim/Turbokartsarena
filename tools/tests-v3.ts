@@ -1,7 +1,10 @@
 import * as assert from 'node:assert';
 import { computeSafeLayout, isButtonVisible, TEST_VIEWPORTS, DEFAULT_ANDROID_INSETS } from '../src/core/safeLayout';
 import { spawnGifts, pickupGift, applyHit, fireWeapon, stepProjectile, makeRacer, updateGifts, aiShouldFire, recoverSpeed } from '../src/core/powerups';
-import { defaultGarage, buyVehicle, buyUpgrade, awardRace, saveGarage, loadGarage, upgradeMultiplier } from '../src/game/economy';
+import { defaultGarage, buyVehicle, buyUpgrade, awardRace, saveGarage, loadGarage, upgradeMultiplier, upgradedProfile } from '../src/game/economy';
+import { Track } from '../src/core/track';
+import { vehicleProfile } from '../src/game/vehicles';
+import { ROSTER } from '../src/game/roster';
 import { VEHICLES } from '../src/game/vehicles';
 import { CIRCUITS } from '../src/game/circuits';
 // Phase 1 : aucun bouton masqué sur les 6 résolutions demandées
@@ -25,4 +28,11 @@ saveGarage(mem,g); assert.equal(loadGarage(mem).coins,g.coins);
 // Phases 5/6 données
 assert.ok(CIRCUITS.length>=12, `circuits=${CIRCUITS.length}`); assert.ok(VEHICLES.length>=14, `vehicles=${VEHICLES.length}`);
 for (const c of CIRCUITS) assert.ok(c.control.length>=8 && c.boosts.length>=1, c.id);
+// Améliorations réelles sur le profil utilisé en course
+const g2 = defaultGarage(); g2.coins = 5000; buyUpgrade(g2, 'apex', 'topSpeed'); buyUpgrade(g2, 'apex', 'braking');
+const baseP = vehicleProfile(ROSTER[0], VEHICLES[0]); const upP = upgradedProfile(baseP, g2);
+assert.ok(upP.speed > baseP.speed && (upP.brake ?? 1) > (baseP.brake ?? 1));
+// Cadeaux sur les 12 circuits : positions sur la piste (échantillon le plus proche < demi-largeur)
+for (const c of CIRCUITS) { const t = new Track(c); for (const gift of spawnGifts(12, c.seed)) { const smp = t.samples[Math.floor(gift.s * t.samples.length)]; assert.ok(Math.abs(gift.lateral) * smp.halfWidth <= smp.halfWidth, c.id); } }
+assert.equal(ROSTER.length, 12);
 console.log(`V3 OK — ${CIRCUITS.length} circuits, ${VEHICLES.length} véhicules, safe-area ${TEST_VIEWPORTS.length} résolutions`);
