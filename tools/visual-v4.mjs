@@ -23,6 +23,7 @@ try {
   browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
     args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   for (const [version, path] of [['v3', '/.preview/v3/index.html'], ['v4', '/index.html']]) {
+    if (process.env.CAPTURE_VERSION && process.env.CAPTURE_VERSION !== version) continue;
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: 'reduce', serviceWorkers: 'block' });
     const page = await context.newPage();
     const errors = [];

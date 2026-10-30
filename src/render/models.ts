@@ -85,7 +85,13 @@ export function createMaterials(theme: CircuitTheme, q: QualitySettings): Materi
   curbMat.emissiveMap = curb.albedo;
   curbMat.emissive = new THREE.Color(0xffffff);
   curbMat.emissiveIntensity = isCity ? 0.5 : 0.08;
-  const groundMat = std(ground, 240, { roughness: 0.95, color: new THREE.Color(isCity ? 0xd8dcff : 0xf2f6ee) });
+  // Ground and road may use the same snow/volcanic cached image. Texture
+  // transforms must not be shared, otherwise the ground's 240x repeat erases
+  // the road's visible ruts and grain. Clones share CPU pixel data only.
+  const groundMaps = ['alpes', 'volcanic'].includes(theme.id) ? {
+    ...ground, albedo: ground.albedo.clone(), normal: ground.normal.clone(), roughness: ground.roughness.clone(),
+  } : ground;
+  const groundMat = std(groundMaps, 240, { roughness: 0.95, color: new THREE.Color(isCity ? 0xd8dcff : 0xf2f6ee) });
   const paintMat = std(paint, 1, { roughness: 0.22, metalness: 0.65, envMapIntensity: 1.6 }); // V3 : carrosserie plus métallique/réfléchissante
   const metalMat = std(metal, 1, { roughness: 0.42, metalness: 0.9, envMapIntensity: 1.1 });
   const rubber = new THREE.MeshStandardMaterial({ color: 0x111116, roughness: 0.95, metalness: 0.02 }); // V3 : pneu plus mat/réaliste

@@ -52,7 +52,8 @@ const FRAG = /* glsl */ `
   varying vec3 vColor;
   void main() {
     vec4 tex = texture2D(uMap, gl_PointCoord);
-    float a = tex.a * vLife * uOpacity;
+    // Procedural smoke/glow encode their mask in red, not opaque RGBA alpha.
+    float a = tex.r * vLife * uOpacity;
     if (a < 0.004) discard;
     gl_FragColor = vec4(vColor * tex.rgb, a);
     #include <colorspace_fragment>

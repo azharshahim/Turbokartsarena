@@ -70,6 +70,11 @@ for (const theme of ['alpes', 'ocean', 'tropical', 'sahara', 'volcanic']) {
   const circuit = CIRCUITS.find(c => c.theme === theme)!;
   const track = new Track(circuit);
   const mats = createMaterials(THEMES[circuit.themeId], QUALITY.low);
+  if (theme === 'alpes' || theme === 'volcanic') {
+    assert.notEqual(mats.road.map, mats.grass.map, 'independent terrain UV transforms');
+    assert.equal(mats.road.map!.repeat.x, 1, 'road ruts remain visible');
+    assert.equal(mats.grass.map!.repeat.x, 240);
+  }
   const visual = buildTrackMesh(track, mats, QUALITY.low, THEMES[circuit.themeId]);
   const road = visual.group.children[0] as Mesh;
   assert.ok(Array.isArray(road.material) && road.material.length > 1, `${theme}: rendered sections`);
