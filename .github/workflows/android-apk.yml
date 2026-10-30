@@ -49,6 +49,13 @@ jobs:
           BROWSER_TEST_URL=http://127.0.0.1:5173/index.html npm run test:browser
       - run: npm run test:browser:v2
       - run: npm run test:pwa
+      - name: Chrome Android — démarrage, rotation et perte de contexte
+        run: npm run test:browser:android
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-webgl-diagnostics
+          path: .preview/android-startup/
       - name: Construire la référence V3 publiée pour les captures réelles
         run: |
           git fetch --no-tags origin 4c8fcb57bfc1d1bf5ed3eda5963107a018767831

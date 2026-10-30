@@ -17,7 +17,8 @@
     "test:v2": "esbuild tools/tests-v2.ts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/tests-v2.cjs --log-level=error && node node_modules/.cache/tests-v2.cjs",
     "test:browser:v2": "node tools/browser-v2.mjs",
     "test:v3": "esbuild tools/tests-v3.ts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/tests-v3.cjs --log-level=error && node node_modules/.cache/tests-v3.cjs",
-    "test:v4": "esbuild tools/tests-v4.ts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/tests-v4.cjs --log-level=error && node node_modules/.cache/tests-v4.cjs"
+    "test:v4": "esbuild tools/tests-v4.ts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/tests-v4.cjs --log-level=error && node node_modules/.cache/tests-v4.cjs",
+    "test:browser:android": "node tools/browser-android-startup.mjs"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^1.24.0",

@@ -1,3 +1,4 @@
+import type { WebGLRenderer } from 'three';
 import { mountGarage } from './garage';
 /**
  * Turbo Karts Arena — hôte navigateur (preview jouable).
@@ -23,6 +24,13 @@ import { autoQuality, QUALITY, type QualityLevel } from '../src/core/config';
 import { formatLap, formatTime } from '../src/core/race';
 import { MultiTouchControls, type TouchAction } from '../src/core/touchControls';
 
+const boot = (window as any).__tkaBoot as {
+  note: (phase: string, detail?: unknown) => void;
+  fail: (error: unknown, phase?: string) => void;
+  finish: () => void;
+  recover: (phase: string) => void;
+} | undefined;
+boot?.note('initialisation de l’interface');
 const $ = (id: string) => document.getElementById(id)!;
 const state = {
   circuitIndex: 0,
@@ -42,6 +50,58 @@ const state = {
 let engine: PhysicsEngine | null = null;
 let showroom: Showroom | null = null;
 let garageRaf = 0;
+let releaseGarageContext = () => {};
+let releaseRaceContext = () => {};
+
+function renderFailure(error: unknown, phase: string) {
+  stopLoop(); cancelAnimationFrame(garageRaf); garageRaf = 0;
+  window.clearTimeout(finishTimeout); finishTimeout = 0;
+  state.starting = false;
+  if (state.screen === 'race') {
+    state.paused = true; clearHeldInputs(); $('pause').classList.remove('hidden');
+  }
+  $('loading').classList.add('hidden');
+  boot?.fail(error, phase);
+}
+
+function observeRenderer(renderer: WebGLRenderer, canvas: HTMLCanvasElement, owner: 'garage' | 'course') {
+  const phase = `contexte WebGL : ${owner}`;
+  let lost = false, disposed = false;
+  renderer.debug.onShaderError = (gl, program, vertex, fragment) => {
+    throw new Error(`Shader ${owner}: ${gl.getProgramInfoLog(program)} ${gl.getShaderInfoLog(vertex)} ${gl.getShaderInfoLog(fragment)}`);
+  };
+  const gl = renderer.getContext();
+  boot?.note(`WebGL initialisé : ${owner}`, {
+    maxTextureSize: renderer.capabilities.maxTextureSize,
+    maxRenderbufferSize: gl.getParameter(gl.MAX_RENDERBUFFER_SIZE),
+    colorBufferFloat: !!gl.getExtension('EXT_color_buffer_float'),
+  });
+  const onLost = (event: Event) => {
+    if (disposed) return;
+    event.preventDefault(); lost = true;
+    renderFailure(new Error('Le contexte graphique a été perdu. Une restauration est en cours ; ne fermez pas cette page immédiatement.'), phase);
+  };
+  const onRestored = () => {
+    // Three.js restores its own GPU state in this event. Resume only afterwards.
+    queueMicrotask(() => {
+      if (disposed || !lost) return;
+      lost = false; boot?.note(`WebGL restauré : ${owner}`); boot?.recover(phase);
+      if (owner === 'garage' && state.screen === 'menu' && !document.hidden && !garageRaf) garageRaf = requestAnimationFrame(garageFrame);
+      if (owner === 'course' && engine) {
+        engine.resetFrameClock(); // remain paused until the player resumes
+        $('pauseStats').textContent = 'Graphismes restaurés. Vous pouvez reprendre la course.';
+      }
+    });
+  };
+  canvas.addEventListener('webglcontextlost', onLost);
+  canvas.addEventListener('webglcontextrestored', onRestored);
+  return () => {
+    disposed = true;
+    canvas.removeEventListener('webglcontextlost', onLost);
+    canvas.removeEventListener('webglcontextrestored', onRestored);
+  };
+}
+
 const premiumGarage = mountGarage({
   garage: () => garage, selected: () => state.vehicleIndex,
   select: index => { state.vehicleIndex = index; },
@@ -53,6 +113,7 @@ document.getElementById('openGarage')!.onclick = () => premiumGarage.open();
 function stopGarage() {
   cancelAnimationFrame(garageRaf);
   garageRaf = 0;
+  releaseGarageContext();
   showroom?.dispose();
   showroom = null;
 }
@@ -63,8 +124,10 @@ function garageFrame(time: number) {
   }
   const canvas = $('garageCanvas') as HTMLCanvasElement;
   showroom.setBackdropVisible($('turboGarage').hidden);
-  showroom.frame(time, canvas.clientWidth, canvas.clientHeight);
-  garageRaf = requestAnimationFrame(garageFrame);
+  try {
+    showroom.frame(time, canvas.clientWidth, canvas.clientHeight);
+    garageRaf = requestAnimationFrame(garageFrame);
+  } catch (error) { renderFailure(error, 'rendu du showroom'); }
 }
 function refreshGarage() {
   if (state.screen !== 'menu') return;
@@ -73,10 +136,13 @@ function refreshGarage() {
   else {
     const canvas = $('garageCanvas');
     canvas.replaceWith(canvas.cloneNode(false));
+    boot?.note('création du showroom WebGL');
     showroom = new Showroom($('garageCanvas') as HTMLCanvasElement, profile);
+    releaseGarageContext = observeRenderer(showroom.renderer, $('garageCanvas') as HTMLCanvasElement, 'garage');
   }
   showroom.reducedMotion = state.reducedMotion;
   showroom.setCircuit(CIRCUITS[state.circuitIndex]);
+  if (showroom.renderer.getContext().isContextLost()) throw new Error('Contexte WebGL perdu pendant la création du showroom');
   if (!garageRaf && !document.hidden) garageRaf = requestAnimationFrame(garageFrame);
 }
 
@@ -99,7 +165,7 @@ function stopLoop() {
 
 function startLoop() {
   stopLoop();
-  if (!engine || state.paused || state.screen !== 'race') return;
+  if (!engine || state.paused || state.screen !== 'race' || engine.renderer.getContext().isContextLost()) return;
   rafId = requestAnimationFrame(loop);
 }
 
@@ -132,6 +198,7 @@ function startEngine() {
   stopLoop();
   window.clearTimeout(finishTimeout);
   finishTimeout = 0;
+  releaseRaceContext();
   engine?.dispose();
   engine = null;
 
@@ -145,6 +212,7 @@ function startEngine() {
   const level = detectQuality();
   const pr = Math.min(window.devicePixelRatio || 1, QUALITY[level].pixelRatioCap);
 
+  boot?.note('chargement du circuit et du moteur WebGL');
   engine = new PhysicsEngine({
     gl: null,
     canvas,
@@ -168,6 +236,9 @@ function startEngine() {
     },
   });
 
+  releaseRaceContext = observeRenderer(engine.renderer, canvas, 'course');
+  if (engine.renderer.getContext().isContextLost()) throw new Error('Contexte WebGL perdu pendant la création du circuit');
+  boot?.note('circuit prêt');
   buildMinimap();
   updateHud();
   updatePlaces();
@@ -186,15 +257,15 @@ function startEngine() {
 
 function loop(t: number) {
   rafId = 0;
-  if (!engine || state.paused || state.screen !== 'race') return;
+  if (!engine || state.paused || state.screen !== 'race' || engine.renderer.getContext().isContextLost()) return;
   engine.setInput({
     steer: currentSteer(),
     drift: currentDrift(),
     brake: currentBrake(),
     throttle: 1,
   });
-  engine.frame(t);
-  if (!engine || state.paused || state.screen !== 'race') return;
+  try { engine.frame(t); } catch (error) { renderFailure(error, 'rendu de la course'); return; }
+  if (!engine || state.paused || state.screen !== 'race' || engine.renderer.getContext().isContextLost()) return;
   updateHud();
   if (rafId !== 0) cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(loop);
@@ -345,7 +416,7 @@ function renderMenu() {
   ($('playBtn') as HTMLButtonElement).style.opacity = ownedV ? '1' : '0.45';
   $('driftLabel').textContent = vehicle.kind === 'kart' ? 'DÉRAPAGE' : 'GLISSE / TURBO';
   $('driverName').style.color = '#' + driver.visorColor.toString(16).padStart(6, '0');
-  refreshGarage();
+  try { refreshGarage(); } catch (error) { renderFailure(error, 'initialisation du showroom'); }
   $('circName').textContent = c.name;
   $('circSub').textContent = `${c.subtitle} · ${c.difficulty ?? 'Intermédiaire'}`;
   $('driverName').textContent = d.name;
@@ -381,6 +452,7 @@ function showMenu() {
   finishTimeout = 0;
   clearHeldInputs();
   stopLoop();
+  releaseRaceContext();
   engine?.dispose();
   engine = null;
   $('stage').innerHTML = '';
@@ -405,6 +477,7 @@ function startRace() {
   finishTimeout = 0;
   clearHeldInputs();
   stopLoop();
+  releaseRaceContext();
   engine?.dispose();
   engine = null;
   state.screen = 'race';
@@ -425,6 +498,8 @@ function startRace() {
     }
     try {
       startEngine();
+    } catch (error) {
+      renderFailure(error, 'initialisation de la course');
     } finally {
       state.starting = false;
       $('loading').classList.add('hidden');
@@ -701,6 +776,7 @@ async function enableGyro() {
 
 function togglePause(v: boolean) {
   if (state.screen !== 'race' || state.paused === v) return;
+  if (!v && engine?.renderer.getContext().isContextLost()) return;
   if (!engine) {
     if (state.starting && v) {
       state.paused = true;
@@ -735,12 +811,24 @@ function togglePause(v: boolean) {
 }
 
 /* redimensionnement */
-window.addEventListener('resize', () => {
-  engine?.resize(window.innerWidth, window.innerHeight);
-});
+let resizeFrame = 0;
+function scheduleResize() {
+  if (resizeFrame) return;
+  resizeFrame = requestAnimationFrame(() => {
+    resizeFrame = 0;
+    if (innerWidth < 1 || innerHeight < 1) return;
+    try {
+      if (engine && !engine.renderer.getContext().isContextLost()) engine.resize(innerWidth, innerHeight);
+    } catch (error) { renderFailure(error, 'redimensionnement de la course'); }
+  });
+}
+window.addEventListener('resize', scheduleResize);
+window.addEventListener('orientationchange', scheduleResize);
+window.visualViewport?.addEventListener('resize', scheduleResize);
 
 /* démarrage : on attend que tout soit monté */
-renderMenu();
+try { renderMenu(); } catch (error) { renderFailure(error, 'initialisation du menu'); }
+boot?.finish();
 $('loading').classList.add('hidden');
 
 /* hook de debug pour les captures automatisées */

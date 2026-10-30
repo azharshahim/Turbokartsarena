@@ -23,7 +23,9 @@ const base = {
 };
 
 /* ---------- 1. build séparé (dev) ---------- */
-const html = readFileSync('preview/index.html', 'utf8').split('./preview/main.ts').join('./preview.js');
+const html = readFileSync('preview/index.html', 'utf8')
+  .replace('/*TKA_BOOT_DIAGNOSTICS*/', () => readFileSync('preview/boot-diagnostics.js', 'utf8'))
+  .split('./preview/main.ts').join('./preview.js');
 writeFileSync('preview/dist/index.html', html);
 
 if (watch) {

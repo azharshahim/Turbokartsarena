@@ -137,8 +137,8 @@ export class PhysicsEngine {
     this.circuit = opts.circuit;
     this.theme = THEMES[opts.circuit.themeId] ?? THEMES.coast;
     this.quality = opts.quality;
-    this.width = opts.width;
-    this.height = opts.height;
+    this.width = Number.isFinite(opts.width) ? Math.max(1, Math.floor(opts.width)) : 1;
+    this.height = Number.isFinite(opts.height) ? Math.max(1, Math.floor(opts.height)) : 1;
     this.isNative = !!opts.gl && !opts.canvas;
     this.targetPixelRatio = clamp(opts.pixelRatio, 0.6, opts.quality.pixelRatioCap);
     this.currentPixelRatio = this.targetPixelRatio;
@@ -715,13 +715,15 @@ export class PhysicsEngine {
   private adaptResolution(dt: number) {
     this.resizeCooldown -= dt;
     const target = 1 / 60;
+    const pixelLimit = this.quality.maxPixels > 0 ? Math.sqrt(this.quality.maxPixels / (this.width * this.height)) : Infinity;
+    const ratioLimit = Math.min(this.targetPixelRatio, pixelLimit);
     // tolérance : on ne réagit qu'aux vraies baisses durables
     if (this.resizeCooldown > 0) return;
     if (this.frameAvg > target * 1.28 && this.currentPixelRatio > 0.62) {
       this.currentPixelRatio = Math.max(0.62, this.currentPixelRatio * 0.9);
       this.applyResolution();
-    } else if (this.frameAvg < target * 0.86 && this.currentPixelRatio < this.targetPixelRatio) {
-      this.currentPixelRatio = Math.min(this.targetPixelRatio, this.currentPixelRatio * 1.05);
+    } else if (this.frameAvg < target * 0.86 && this.currentPixelRatio < ratioLimit) {
+      this.currentPixelRatio = Math.min(ratioLimit, this.currentPixelRatio * 1.05);
       this.applyResolution();
     }
   }
@@ -734,11 +736,16 @@ export class PhysicsEngine {
 
   /** Appelé par l'hôte lors d'une rotation / changement de taille. */
   resize(width: number, height: number) {
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) return;
+    width = Math.floor(width); height = Math.floor(height);
+    if (this.width === width && this.height === height) return;
     this.width = width;
     this.height = height;
+    const pixelLimit = this.quality.maxPixels > 0 ? Math.sqrt(this.quality.maxPixels / (width * height)) : Infinity;
+    this.currentPixelRatio = Math.min(this.currentPixelRatio, this.targetPixelRatio, pixelLimit);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(width, height, false);
+    this.renderer.setDrawingBufferSize(width, height, this.currentPixelRatio);
     this.postfx.setSize(width, height, this.currentPixelRatio);
   }
 
