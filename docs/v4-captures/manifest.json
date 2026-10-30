@@ -1,0 +1,115 @@
+{
+  "baseline": "4c8fcb57bfc1d1bf5ed3eda5963107a018767831",
+  "working_code_base": "abba138 + corrections masque des particules et isolation UV neige/volcan",
+  "bundle_sha256": "c0f60b04933e6c030aba0d377da10e6d6baf3b32bfb8c853d78eb9b480d682e7",
+  "renderer": "Chromium 131 / SwiftShader, véritables scènes du jeu",
+  "viewport": [
+    1280,
+    800
+  ],
+  "reducedMotion": true,
+  "camera": "Caméra de course après 180 pas de 16.67 ms ; cadeau : gros plan du mesh existant, sans substitution. Kart/moto : canevas showroom.",
+  "limits": "Les courses peuvent différer légèrement : particules et comportement IA ne sont pas intégralement déterministes. Les PNG ne constituent pas des mesures Android.",
+  "captures": [
+    {
+      "subject": "Kart",
+      "file": "v3/kart.png",
+      "sha256": "f3b6bc7f8979f449f6ee80565dbfb5594f3c11e76fa8853e00d32e18b0c2b839"
+    },
+    {
+      "subject": "Kart",
+      "file": "v4/kart.png",
+      "sha256": "a6c857aa69a63822da896fd31a6ca16aa657e88bd10cf29d599c1eac43ba2005"
+    },
+    {
+      "subject": "Moto",
+      "file": "v3/moto.png",
+      "sha256": "e9b68c0461777e2c7c094684b56a08d67654f97b02ca5af33d1cf7124ba64aa3"
+    },
+    {
+      "subject": "Moto",
+      "file": "v4/moto.png",
+      "sha256": "e78bfb7ca645c2d91e851aebea42da9877e572cf5788025a8de4287c7b743458"
+    },
+    {
+      "subject": "Garage",
+      "file": "v3/garage.png",
+      "sha256": "fa943bc9bee7c469affa0873435c5d0dfe9a9e73ec038f2461217985104767bd"
+    },
+    {
+      "subject": "Garage",
+      "file": "v4/garage.png",
+      "sha256": "58fd8b184aeb141eba6bc0b9ecfd3a37241d3015da1e080e5425a3a9a98ec08d"
+    },
+    {
+      "subject": "Sahara",
+      "file": "v3/desert.png",
+      "sha256": "ebc57ea2a833a4ae6dd8b363eb56cdd25ec473bd68836556814aa329edc0123d"
+    },
+    {
+      "subject": "Sahara",
+      "file": "v4/desert.png",
+      "sha256": "86818ec2d618e096c5de5b9c8d277f3d2b007e4de30cd0f26cca97b141fd6592"
+    },
+    {
+      "subject": "Montagne tropicale",
+      "file": "v3/tropical.png",
+      "sha256": "b60b85323e8c24c046956a555285cdc2048dd3d277a5bf9f9534a4a5208f9c9d"
+    },
+    {
+      "subject": "Montagne tropicale",
+      "file": "v4/tropical.png",
+      "sha256": "5fe3e8d93d86694ce11a8c4c15b5d18c76f036bf09ba037eedbfe9c845b66687"
+    },
+    {
+      "subject": "Alpes Extrêmes",
+      "file": "v3/neige.png",
+      "sha256": "9c28d147e044993127207c6167fc3a471d3e133457b69951daf1d29d571bc284"
+    },
+    {
+      "subject": "Alpes Extrêmes",
+      "file": "v4/neige.png",
+      "sha256": "f6a75484e00a5b25e1f8ffdd90a6af7612327ea13b039176818029f1556ce57b"
+    },
+    {
+      "subject": "Cadeau",
+      "file": "v3/cadeau.png",
+      "sha256": "f8d9c5e7b7898e71cc9a8de9c9483aa58d6fee63b55eef6a88a771f8963fdb3f"
+    },
+    {
+      "subject": "Cadeau",
+      "file": "v4/cadeau.png",
+      "sha256": "4b4354ad4eb7759fedd8016628eb22ffb9917146c82d9f1686c007b8f2dcdab4"
+    },
+    {
+      "subject": "Accueil",
+      "file": "v3/accueil.png",
+      "sha256": "b41121e7d6391c83d5f5d9ec8418a71148c08e10bc922568cb6c28950de88a57"
+    },
+    {
+      "subject": "Accueil",
+      "file": "v4/accueil.png",
+      "sha256": "0f50b92bf2abf5e20d6731456a251680d8c7afc5e754ab5e38e2720ee75df02a"
+    },
+    {
+      "subject": "Îles volcaniques",
+      "file": "v3/volcanique.png",
+      "sha256": "6452842d34f91740fcc8566057dcec8af78d7225b37b878f63da54652274c1f2"
+    },
+    {
+      "subject": "Îles volcaniques",
+      "file": "v4/volcanique.png",
+      "sha256": "8d4668b03d01d3a5515241c3daaf765f242c90af3a5c66728f7697c3cc36ad7d"
+    },
+    {
+      "subject": "Tokyo",
+      "file": "v3/urbain.png",
+      "sha256": "3b12522b2244ee051e59b2ba7d82bc312531ae1dbc3e233786416f06a0fac874"
+    },
+    {
+      "subject": "Tokyo",
+      "file": "v4/urbain.png",
+      "sha256": "2bde3d42af2515da4811953b703eaf7a4f1627506f45f7a963ee63e728622637"
+    }
+  ]
+}

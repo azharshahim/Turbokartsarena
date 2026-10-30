@@ -32,6 +32,8 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run test:v2
+      - run: npm run test:v3
+      - run: npm run test:v4
       - run: npm run preview:build
       - name: Installer Chromium pour Playwright
         run: npx playwright install --with-deps chromium
@@ -47,6 +49,21 @@ jobs:
           BROWSER_TEST_URL=http://127.0.0.1:5173/index.html npm run test:browser
       - run: npm run test:browser:v2
       - run: npm run test:pwa
+      - name: Construire la référence V3 publiée pour les captures réelles
+        run: |
+          git fetch --no-tags origin 4c8fcb57bfc1d1bf5ed3eda5963107a018767831
+          mkdir -p .preview/v3
+          git archive 4c8fcb57bfc1d1bf5ed3eda5963107a018767831 | tar -x -C .preview/v3
+          ln -s "$GITHUB_WORKSPACE/node_modules" .preview/v3/node_modules
+          cd .preview/v3
+          node tools/build-preview.mjs
+      - name: Comparaisons V3 / chantier V4 et régressions garage
+        run: node tools/visual-v4.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v3-v4-real-renders
+          path: .preview/comparison/
       - run: npx expo prebuild --platform android --no-install
       - name: "Build APK (release, signé avec la clé debug : installable directement)"
         working-directory: android

@@ -1,3 +1,4 @@
+import { mountGarage } from './garage';
 /**
  * Turbo Karts Arena — hôte navigateur (preview jouable).
  *
@@ -32,6 +33,7 @@ const state = {
   input: 'buttons' as 'buttons' | 'gyro',
   laps: 3,
   showFps: false,
+  reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
   paused: false,
   screen: 'menu' as 'menu' | 'race' | 'results',
   starting: false,
@@ -40,6 +42,14 @@ const state = {
 let engine: PhysicsEngine | null = null;
 let showroom: Showroom | null = null;
 let garageRaf = 0;
+const premiumGarage = mountGarage({
+  garage: () => garage, selected: () => state.vehicleIndex,
+  select: index => { state.vehicleIndex = index; },
+  persist: persistGarage, refresh: () => renderMenu(),
+  reduceMotion: value => { state.reducedMotion = value; if (showroom) showroom.reducedMotion = value; },
+});
+document.getElementById('motionToggle')!.onclick = () => { state.reducedMotion = !state.reducedMotion; if (engine) engine.reducedMotion = state.reducedMotion; renderMenu(); };
+document.getElementById('openGarage')!.onclick = () => premiumGarage.open();
 function stopGarage() {
   cancelAnimationFrame(garageRaf);
   garageRaf = 0;
@@ -52,6 +62,7 @@ function garageFrame(time: number) {
     return;
   }
   const canvas = $('garageCanvas') as HTMLCanvasElement;
+  showroom.setBackdropVisible($('turboGarage').hidden);
   showroom.frame(time, canvas.clientWidth, canvas.clientHeight);
   garageRaf = requestAnimationFrame(garageFrame);
 }
@@ -64,6 +75,8 @@ function refreshGarage() {
     canvas.replaceWith(canvas.cloneNode(false));
     showroom = new Showroom($('garageCanvas') as HTMLCanvasElement, profile);
   }
+  showroom.reducedMotion = state.reducedMotion;
+  showroom.setCircuit(CIRCUITS[state.circuitIndex]);
   if (!garageRaf && !document.hidden) garageRaf = requestAnimationFrame(garageFrame);
 }
 
@@ -139,6 +152,7 @@ function startEngine() {
     height: window.innerHeight,
     pixelRatio: pr,
     quality: QUALITY[level],
+    reducedMotion: state.reducedMotion,
     circuit: CIRCUITS[state.circuitIndex],
     profile: upgradedProfile(vehicleProfile(ROSTER[state.driverIndex], VEHICLES[state.vehicleIndex]), garage),
     difficulty: state.difficulty,
@@ -314,6 +328,7 @@ function toast(text: string, color = '#fff', ms = 900) {
 /* ------------------------------------------------------------------ */
 
 function renderMenu() {
+  $('motionToggle').textContent = `Animations : ${state.reducedMotion ? 'réduites' : 'complètes'}`;
   const c = CIRCUITS[state.circuitIndex];
   const driver = ROSTER[state.driverIndex];
   const vehicle = VEHICLES[state.vehicleIndex];

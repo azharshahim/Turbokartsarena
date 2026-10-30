@@ -1,4 +1,4 @@
-/** Original lightweight vehicle meshes. No licensed/commercial model assets. */
+/** Original procedural vehicle meshes; no external model or texture assets. */
 import * as T from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { KartProfile } from '../game/roster';
@@ -12,7 +12,7 @@ export function createVehicle(profile: KartProfile, q: QualitySettings): KartMod
   const bike = v.kind !== 'kart',
     cross = v.kind === 'cross',
     touring = v.kind === 'touring';
-  const seg = q.level === 'low' ? 10 : 18;
+  const seg = q.level === 'low' ? 10 : q.level === 'ultra' ? 28 : 18;
   const root = new T.Group(),
     body = new T.Group(),
     lod = new T.Group();
@@ -142,6 +142,16 @@ export function createVehicle(profile: KartProfile, q: QualitySettings): KartMod
         spin,
       );
     }
+    // Raised paired tread blocks, visible on every tire (not a color swap).
+    if (!cross && q.level !== 'low')
+      for (let i = 0; i < (q.level === 'ultra' ? 32 : 20); i++) {
+        const a = i * Math.PI * 2 / (q.level === 'ultra' ? 32 : 20);
+        for (const side of [-1, 1]) {
+          const tread = box(width * 0.42, 0.012, 0.035, rubber,
+            [side * width * 0.24, Math.cos(a) * (wheelRadius + 0.004), Math.sin(a) * (wheelRadius + 0.004)], spin);
+          tread.rotation.x = a;
+        }
+      }
     if (cross)
       for (let i = 0; i < 16; i++) {
         const a = (i / 16) * Math.PI * 2;
@@ -244,7 +254,7 @@ export function createVehicle(profile: KartProfile, q: QualitySettings): KartMod
     shock.name = 'rear-suspension';
   } else {
     // Separate original bodywork and frames for sprint/formula/rally/club karts.
-    const formula = v.id === 'vector',
+    const formula = v.shape === 'formula',
       rally = v.id === 'nomad',
       sprint = v.id === 'pulse';
     for (const side of [-1, 1]) {
@@ -294,6 +304,67 @@ export function createVehicle(profile: KartProfile, q: QualitySettings): KartMod
     const steering = mesh(new T.TorusGeometry(0.18, 0.027, 6, seg), rubber, [0, 0.87, 0.27]);
     steering.rotation.x = -0.65;
   }
+  // V4 mechanical package: all parts are batched with the existing body/wheel
+  // materials below. Detail tiers change geometry, not only lighting.
+  const detail = q.level === 'low' ? 0 : q.level === 'ultra' ? 2 : 1;
+  const coil = (a: Point, b: Point, radius: number) => {
+    const start = new T.Vector3(...a), end = new T.Vector3(...b);
+    const axis = end.clone().sub(start).normalize();
+    const u = new T.Vector3(1, 0, 0).cross(axis).normalize();
+    const w = axis.clone().cross(u);
+    const points: T.Vector3[] = [];
+    const count = detail === 2 ? 64 : 32;
+    for (let i = 0; i <= count; i++) {
+      const t = i / count, angle = t * Math.PI * 12;
+      points.push(start.clone().lerp(end, t).addScaledVector(u, Math.cos(angle) * radius).addScaledVector(w, Math.sin(angle) * radius));
+    }
+    mesh(new T.TubeGeometry(new T.CatmullRomCurve3(points), count, 0.012, 4, false), accent, [0, 0, 0]);
+  };
+  if (detail) {
+    if (bike) {
+      coil([0, 0.64, -0.56], [0, 1.07, -0.28], 0.085);
+      // Radiator matrix, foot pegs and drilled rear sprocket/chain run.
+      box(0.43, 0.35, 0.06, dark, [0, 0.8, 0.41]);
+      for (let i = 0; i < 9; i++) box(0.39, 0.012, 0.025, alloy, [0, 0.65 + i * 0.035, 0.455]);
+      for (const side of [-1, 1]) {
+        tube([side * 0.2, 0.55, -0.25], [side * 0.43, 0.55, -0.25], 0.035, alloy);
+        const panel = shell([[0.06, 0.86, 0.025, 0.2], [0.4, 0.93, 0.035, 0.24], [0.72, 1.06, 0.015, 0.1]], accent);
+        panel.position.x = side * 0.32;
+        // Aerodynamic winglets on sport bikes; bark guards on cross models.
+        box(cross ? 0.23 : 0.3, 0.035, cross ? 0.09 : 0.18, paint,
+          [side * (cross ? 0.43 : 0.4), cross ? 1.33 : 1.02, cross ? 0.64 : 0.66]);
+        for (let i = 0; i < 4; i++) box(0.035, 0.025, 0.15, dark, [side * 0.365, 0.82 + i * 0.05, 0.38]);
+      }
+      tube([-0.16, 0.54, -0.21], [-0.16, wheelRadius + 0.15, -1.02], 0.014, dark);
+      tube([-0.16, 0.48, -0.21], [-0.16, wheelRadius - 0.15, -1.02], 0.014, dark);
+      const cap = mesh(new T.CylinderGeometry(0.065, 0.065, 0.016, seg), alloy, [0, 1.36, 0.22]);
+      cap.rotation.x = 0.1;
+    } else {
+      // Front double wishbones, coil-over shocks and sculpted wheel arches.
+      for (const side of [-1, 1]) {
+        coil([side * 0.52, 0.55, 0.6], [side * 0.82, 0.36, 0.84], 0.055);
+        for (const y of [0.25, 0.43]) {
+          tube([side * 0.4, y, 0.52], [side * 0.83, y, 0.84], 0.023, alloy);
+          tube([side * 0.4, y, 1.02], [side * 0.83, y, 0.84], 0.023, alloy);
+        }
+        const arch = mesh(new T.TorusGeometry(0.4, 0.065, 6, seg, Math.PI), paint, [side * 0.88, 0.34, -0.84]);
+        arch.rotation.y = Math.PI / 2;
+        // Bucket seat bolsters, air intake slats and rear diffuser vanes.
+        ellipsoid(0.18, [0.5, 1.5, 1.8], seat, [side * 0.25, 0.62, -0.35]);
+        for (let i = 0; i < 5; i++) box(0.12, 0.018, 0.025, dark, [side * 0.55, 0.55, -0.25 + i * 0.08]);
+        box(0.035, 0.13, 0.35, dark, [side * 0.32, 0.23, -1.02]);
+        box(0.04, 0.18, 0.34, paint, [side * 0.78, 0.39, 1.12]);
+      }
+      tube([-0.55, 0.3, -0.84], [0.88, 0.3, -0.84], 0.04, alloy);
+      // Curved exhaust headers and rolled outlet lip.
+      tube([0.53, 0.56, -0.62], [0.73, 0.62, -0.8], 0.06, alloy);
+      const lip = mesh(new T.TorusGeometry(0.08, 0.018, 6, seg), alloy, [0.75, 0.55, -1.05]);
+      lip.rotation.x = -0.4;
+      box(0.54, 0.12, 0.025, tail, [0, 0.39, -1.08]);
+    }
+  }
+  root.userData.detailTier = detail;
+  root.userData.wheelRadius = wheelRadius;
   // Fully helmeted rider: articulated torso/head, bent arms and legs, boots,
   // gloves, shoulder protectors and individual helmet stripe/visor colors.
   const torso = new T.Group(),

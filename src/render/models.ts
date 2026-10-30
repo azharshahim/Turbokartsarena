@@ -11,6 +11,7 @@
  */
 
 import * as THREE from 'three';
+import { terrainForTheme } from '../core/terrain';
 import { vehicleFor } from '../game/vehicles';
 import { createVehicle } from './vehicles';
 import type { KartProfile } from '../game/roster';
@@ -18,6 +19,7 @@ import type { CircuitTheme } from '../game/circuits';
 import type { QualitySettings } from '../core/config';
 import {
   asphaltTexture,
+  terrainTexture,
   bannerTexture,
   bodyPaintTexture,
   concreteTexture,
@@ -67,11 +69,13 @@ export function createMaterials(theme: CircuitTheme, q: QualitySettings): Materi
 
   const asphalt = asphaltTexture(size, aniso, isCity ? 0.3 : 0.34);
   const curb = curbTexture(size, aniso, theme.curbColors[0], theme.curbColors[1]);
-  const ground = isSand ? sandTexture(size, aniso) : isCity ? concreteTexture(size, aniso) : grassTexture(size, aniso);
+  const ground = theme.id === 'alpes' ? terrainTexture('snow', size, aniso) : theme.id === 'volcanic' ? terrainTexture('volcanic', size, aniso) : isSand ? sandTexture(size, aniso) : isCity ? concreteTexture(size, aniso) : grassTexture(size, aniso);
   const paint = bodyPaintTexture(size, aniso);
   const metal = metalTexture(size, aniso);
 
-  const road = std(asphalt, 1, {
+  const terrain = terrainForTheme(theme.id);
+  const roadTexture = terrain === 'asphalt' ? asphalt : terrainTexture(terrain, size, aniso);
+  const road = std(roadTexture, 1, {
     roughness: 0.88,
     metalness: 0.03,
     color: new THREE.Color(0xffffff),
@@ -81,7 +85,13 @@ export function createMaterials(theme: CircuitTheme, q: QualitySettings): Materi
   curbMat.emissiveMap = curb.albedo;
   curbMat.emissive = new THREE.Color(0xffffff);
   curbMat.emissiveIntensity = isCity ? 0.5 : 0.08;
-  const groundMat = std(ground, 240, { roughness: 0.95, color: new THREE.Color(isCity ? 0xd8dcff : 0xf2f6ee) });
+  // Ground and road may use the same snow/volcanic cached image. Texture
+  // transforms must not be shared, otherwise the ground's 240x repeat erases
+  // the road's visible ruts and grain. Clones share CPU pixel data only.
+  const groundMaps = ['alpes', 'volcanic'].includes(theme.id) ? {
+    ...ground, albedo: ground.albedo.clone(), normal: ground.normal.clone(), roughness: ground.roughness.clone(),
+  } : ground;
+  const groundMat = std(groundMaps, 240, { roughness: 0.95, color: new THREE.Color(isCity ? 0xd8dcff : 0xf2f6ee) });
   const paintMat = std(paint, 1, { roughness: 0.22, metalness: 0.65, envMapIntensity: 1.6 }); // V3 : carrosserie plus métallique/réfléchissante
   const metalMat = std(metal, 1, { roughness: 0.42, metalness: 0.9, envMapIntensity: 1.1 });
   const rubber = new THREE.MeshStandardMaterial({ color: 0x111116, roughness: 0.95, metalness: 0.02 }); // V3 : pneu plus mat/réaliste
@@ -440,8 +450,18 @@ export function createScenery(
   const animated: SceneryResult['animated'] = [];
 
   const foliageMats = theme.foliage.map(
-    (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.86, flatShading: true }),
+    () => new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.86, flatShading: true }),
   );
+  for (const material of foliageMats) {
+    material.side = THREE.DoubleSide;
+    material.userData.windTime = { value: 0 };
+    material.onBeforeCompile = shader => {
+      shader.uniforms.uWindTime = material.userData.windTime;
+      shader.vertexShader = 'uniform float uWindTime;\n' + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n transformed.x += sin(uWindTime*1.4 + position.y*.7) * max(0.,position.y-2.)*.035;');
+    };
+    material.customProgramCacheKey = () => 'v4-foliage-wind';
+  }
   const rockMat = new THREE.MeshStandardMaterial({ color: theme.rock, roughness: 0.92, flatShading: true });
   const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5b3f2a, roughness: 0.95 });
   disposables.push(...foliageMats, rockMat, trunkMat);
@@ -455,9 +475,13 @@ export function createScenery(
   // 3 variantes réutilisées par InstancedMesh (un appel de dessin par variante)
   // Chaque variante est un petit "buisson d'arbres" fusionné (tronc + 3 houppes) :
   // 1 seul appel de dessin instancié, mais une silhouette crédible.
-  const makeTreeVariant = (kind: 'pine' | 'round' | 'cactus' | 'palm' | 'neon') => {
+  const makeTreeVariant = (kind: 'pine' | 'round' | 'cactus' | 'palm' | 'neon', foliage: number) => {
     const parts: THREE.BufferGeometry[] = [];
     const push = (geo: THREE.BufferGeometry, x: number, y: number, z: number, sx = 1, sy = 1) => {
+      const tint = new THREE.Color(geo instanceof THREE.CylinderGeometry && kind !== 'cactus' && kind !== 'neon' ? 0x674733 : foliage);
+      const colors = new Float32Array(geo.getAttribute('position').count * 3);
+      for (let i = 0; i < colors.length; i += 3) { colors[i] = tint.r; colors[i + 1] = tint.g; colors[i + 2] = tint.b; }
+      geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
       geo.scale(sx, sy, sx);
       geo.translate(x, y, z);
       // mergeGeometries exige des attributs homogènes (indexé ou non) :
@@ -481,12 +505,17 @@ export function createScenery(
       push(new THREE.SphereGeometry(0.55, 8, 6), 0, 4.6, 0);
     } else if (kind === 'palm') {
       push(new THREE.CylinderGeometry(0.24, 0.36, 5.4, 6), 0, 2.7, 0);
-      for (let i = 0; i < 5; i++) {
-        const leaf = new THREE.ConeGeometry(0.42, 3.2, 5);
-        leaf.rotateZ(Math.PI / 2.1);
-        leaf.rotateY((i / 5) * Math.PI * 2);
-        leaf.translate(0, 5.4, 0);
-        parts.push(leaf.index ? leaf.toNonIndexed() : leaf);
+      for (let i = 0; i < 7; i++) {
+        const vertices: number[] = [], indices: number[] = [];
+        for (let j = 0; j <= 8; j++) {
+          const t = j / 8, width = Math.sin(t * Math.PI) * .42;
+          vertices.push(t * 3.7, 5.6 + Math.sin(t * Math.PI) * .65 - t * 1.1, -width,
+            t * 3.7, 5.6 + Math.sin(t * Math.PI) * .65 - t * 1.1, width);
+          if (j < 8) indices.push(j * 2, j * 2 + 1, j * 2 + 2, j * 2 + 1, j * 2 + 3, j * 2 + 2);
+        }
+        const leaf = new THREE.BufferGeometry(); leaf.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3)); leaf.setIndex(indices); leaf.computeVertexNormals();
+        leaf.rotateY(i / 7 * Math.PI * 2);
+        parts.push(leaf.toNonIndexed());
       }
     } else {
       push(new THREE.CylinderGeometry(0.3, 0.44, 5.2, 6), 0, 2.6, 0);
@@ -495,6 +524,11 @@ export function createScenery(
     }
     // attributs communs : position + normal + uv
     for (const p of parts) {
+      if (!p.getAttribute('color')) {
+        const colors = new Float32Array(p.getAttribute('position').count * 3), tint = new THREE.Color(foliage);
+        for (let i = 0; i < colors.length; i += 3) { colors[i] = tint.r; colors[i + 1] = tint.g; colors[i + 2] = tint.b; }
+        p.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      }
       if (!p.getAttribute('uv')) {
         const n = p.getAttribute('position').count;
         p.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(n * 2), 2));
@@ -507,9 +541,11 @@ export function createScenery(
     ? ['cactus', 'cactus', 'round']
     : isNight
       ? ['neon', 'neon', 'round']
-      : ['pine', 'round', 'palm'];
+      : ['alpes', 'alpine'].includes(theme.id) ? ['pine', 'pine', 'pine']
+      : ['jungle', 'tropical', 'ocean', 'coast', 'mediterranean'].includes(theme.id) ? ['palm', 'round', 'palm']
+      : theme.id === 'volcanic' ? ['palm', 'palm', 'round'] : ['pine', 'round', 'palm'];
 
-  const treeGeo: THREE.BufferGeometry[] = kinds.map((k) => makeTreeVariant(k));
+  const treeGeo: THREE.BufferGeometry[] = kinds.map((k, i) => makeTreeVariant(k, theme.id === 'alpes' ? 0xb8d7d5 : theme.foliage[i % theme.foliage.length]));
   for (const g of treeGeo) disposables.push(g);
 
   for (let v = 0; v < 3; v++) {
