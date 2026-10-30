@@ -1,0 +1,22 @@
+import * as assert from 'node:assert';
+import { CIRCUITS, THEMES } from '../src/game/circuits';
+import { terrainFactors, terrainForTheme, TERRAIN_PHYSICS } from '../src/core/terrain';
+import { terrainTexture } from '../src/render/textures';
+import { createGiftMesh, updateGiftMesh } from '../src/render/gifts3d';
+import { spawnGifts } from '../src/core/powerups';
+import { BoxGeometry, Mesh } from 'three';
+
+assert.equal(CIRCUITS.length, 12);
+for (const c of CIRCUITS) assert.equal(terrainForTheme(c.theme), terrainForTheme(THEMES[c.themeId].id), c.id);
+assert.equal(new Set(CIRCUITS.map(c => terrainForTheme(c.theme))).size, 6);
+assert.ok(TERRAIN_PHYSICS.snow.grip < TERRAIN_PHYSICS.dirt.grip);
+assert.ok(TERRAIN_PHYSICS.sand.acceleration < TERRAIN_PHYSICS.asphalt.acceleration);
+assert.ok(terrainFactors('alpes', true).grip > terrainFactors('alpes', false).grip);
+const samples = (['dirt', 'sand', 'gravel', 'snow', 'volcanic'] as const).map(k => Array.from(terrainTexture(k, 32, 1).albedo.image.data as Uint8Array).join(','));
+assert.equal(new Set(samples).size, 5);
+const gift = spawnGifts(1, 42)[0];
+const mesh = createGiftMesh(gift);
+assert.ok(((mesh.children[0] as Mesh).geometry as BoxGeometry).parameters.width > 0.9);
+updateGiftMesh(mesh, gift, 1); const angle = mesh.rotation.y; updateGiftMesh(mesh, gift, 2); assert.notEqual(mesh.rotation.y, angle);
+gift.active = false; updateGiftMesh(mesh, gift, 3); assert.equal(mesh.visible, false);
+console.log('V4 ciblé OK — 12 circuits, six terrains, textures, physique et cadeaux');

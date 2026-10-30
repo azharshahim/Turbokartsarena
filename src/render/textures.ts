@@ -11,6 +11,7 @@
  */
 
 import * as THREE from 'three';
+import type { Terrain } from '../core/terrain';
 import { fbm2D, valueNoise2D, clamp01, lerp } from '../core/math';
 
 export interface TextureSet {
@@ -123,6 +124,27 @@ export function asphaltTexture(size: number, aniso: number, tint = 0.31) {
     let c = tint + (grain - 0.5) * 0.19 + (speck > 0.93 ? 0.16 : 0) + (macro - 0.5) * 0.06;
     const h = grain * 0.6 + speck * 0.25 + macro * 0.15;
     return { r: c * 0.98, g: c, b: c * 1.06, h, rough: 0.86 + (1 - speck) * 0.12 };
+  });
+}
+
+/** Road surfaces with distinct grain, ruts and height-derived normal maps. */
+export function terrainTexture(kind: Exclude<Terrain, 'asphalt'>, size: number, aniso: number) {
+  const palette: Record<Exclude<Terrain, 'asphalt'>, [number, number, number]> = {
+    dirt: [0.49, 0.30, 0.17], sand: [0.82, 0.63, 0.39],
+    gravel: [0.48, 0.43, 0.37], snow: [0.83, 0.90, 0.95], volcanic: [0.20, 0.18, 0.18],
+  };
+  return buildTexture(`road-${kind}`, size, aniso, (u, v) => {
+    const grain = fbm2D(u * 100, v * 100, 100, 3, 13);
+    const stones = valueNoise2D(u * 54, v * 54, 54, 19);
+    const ripple = Math.sin((v * 18 + fbm2D(u * 4, v * 4, 4, 2, 3)) * Math.PI * 2);
+    // Two pairs of compacted wheel tracks, repeated across the road.
+    const rut = Math.max(0, 1 - Math.abs(Math.sin(u * Math.PI * 4)) * 9);
+    const stone = (kind === 'gravel' || kind === 'volcanic') ? Math.max(0, stones - 0.53) : 0;
+    const relief = kind === 'sand' ? ripple * 0.12 : stone * 0.5;
+    const k = 0.84 + grain * 0.3 + relief - rut * 0.14;
+    const c = palette[kind];
+    return { r: c[0] * k, g: c[1] * k, b: c[2] * k,
+      h: grain * 0.35 + relief - rut * 0.25, rough: kind === 'snow' ? 0.75 : 0.96 };
   });
 }
 

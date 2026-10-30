@@ -32,6 +32,8 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run test:v2
+      - run: npm run test:v3
+      - run: npm run test:v4
       - run: npm run preview:build
       - name: Installer Chromium pour Playwright
         run: npx playwright install --with-deps chromium

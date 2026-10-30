@@ -1,3 +1,4 @@
+import { terrainFactors } from './terrain';
 /**
  * Turbo Karts Arena — modèle physique du kart (arcade).
  *
@@ -382,6 +383,7 @@ export class Kart {
     /* ---------- 5. forces longitudinales ---------- */
     const throttle = clamp(input.throttle, 0, 1);
     const grassPenalty = st.surface === 'grass' ? 0.7 : st.surface === 'curb' ? 0.97 : 1;
+    const terrain = st.surface === 'grass' ? { grip: 1, acceleration: 1 } : terrainFactors(track.layout.theme, this.stats.bike);
 
     const fwdX = Math.sin(st.heading);
     const fwdZ = Math.cos(st.heading);
@@ -401,7 +403,7 @@ export class Kart {
       const ratio = clamp(vf / (maxSpeed * grassPenalty), -1, 1);
       // Courbe de couple : franche à bas régime, nulle à Vmax (0,98) → pas d'à-coup
       const falloff = Math.max(0, 1 - ratio * ratio);
-      const engine = this.stats.accel * throttle * falloff;
+      const engine = this.stats.accel * throttle * falloff * terrain.acceleration;
       vf += engine * dt;
     }
 
@@ -455,7 +457,7 @@ export class Kart {
         : this.stats.grip;
     const grip = st.airborne
       ? 1.2
-      : gripBase * (track.layout.rain ? 0.85 : 1) * (this.stats.bike && st.drifting ? 1.25 : 1);
+      : gripBase * terrain.grip * (track.layout.rain ? 0.85 : 1) * (this.stats.bike && st.drifting ? 1.25 : 1);
     const decay = 1 - Math.exp(-grip * dt);
     vl -= vl * decay;
 

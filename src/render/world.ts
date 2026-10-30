@@ -816,6 +816,16 @@ export class PhysicsEngine {
       m.dispose();
       this.scene.remove(m.root);
     }
+    // Gift ribbons share a material within each box: dispose each resource once.
+    const giftMaterials = new Set<THREE.Material>();
+    for (const gift of this.giftMeshes) gift.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      object.geometry.dispose();
+      for (const material of Array.isArray(object.material) ? object.material : [object.material]) giftMaterials.add(material);
+    });
+    for (const material of giftMaterials) material.dispose();
+    for (const bubble of this.shieldMeshes) { bubble.geometry.dispose(); (bubble.material as THREE.Material).dispose(); }
+    for (const projectile of this.projectiles) { projectile.mesh.geometry.dispose(); (projectile.mesh.material as THREE.Material).dispose(); }
     this.effects.dispose();
     this.trackMesh.dispose();
     this.terrain?.geometry.dispose();

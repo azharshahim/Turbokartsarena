@@ -11,8 +11,28 @@ export class Showroom {
   readonly camera = new T.PerspectiveCamera(34, 1, 0.1, 50);
   private model: ReturnType<typeof createVehicle>;
   private floor: T.Mesh;
+  private canvas: HTMLCanvasElement | null;
+  private angle = -0.5;
+  private dragging = false;
+  private lastX = 0;
+  private lastTime = 0;
+  private onDown = (e: PointerEvent) => { this.dragging = true; this.lastX = e.clientX; this.canvas?.setPointerCapture(e.pointerId); };
+  private onMove = (e: PointerEvent) => { if (this.dragging) { this.angle += (e.clientX - this.lastX) * 0.012; this.lastX = e.clientX; } };
+  private onUp = () => { this.dragging = false; };
+  private onWheel = (e: WheelEvent) => { e.preventDefault(); this.zoom(e.deltaY * 0.003); };
+  zoom(amount: number) { this.camera.position.setLength(T.MathUtils.clamp(this.camera.position.length() + amount, 3.5, 9)); }
+
   constructor(canvas: HTMLCanvasElement | null, profile: KartProfile, gl?: any) {
     this.native = !!gl;
+    this.canvas = canvas;
+    if (canvas) {
+      canvas.style.touchAction = 'pan-y';
+      canvas.addEventListener('pointerdown', this.onDown);
+      canvas.addEventListener('pointermove', this.onMove);
+      canvas.addEventListener('pointerup', this.onUp);
+      canvas.addEventListener('pointercancel', this.onUp);
+      canvas.addEventListener('wheel', this.onWheel, { passive: false });
+    }
     this.renderer = new T.WebGLRenderer({
       canvas: canvas ?? makeCanvasShim(gl),
       context: gl,
@@ -50,12 +70,21 @@ export class Showroom {
     this.renderer.setSize(Math.max(1, width), Math.max(1, height), false);
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
-    this.model.root.rotation.y = Math.sin(time * 0.0002) * 0.6 - 0.5;
+    if (this.lastTime && !this.dragging) this.angle += Math.min(0.05, (time - this.lastTime) / 1000) * 0.35;
+    this.lastTime = time;
+    this.model.root.rotation.y = this.angle;
     this.renderer.render(this.scene, this.camera);
     const gl = this.renderer.getContext() as any;
     if (gl.endFrameEXP) gl.endFrameEXP();
   }
   dispose() {
+    if (this.canvas) {
+      this.canvas.removeEventListener('pointerdown', this.onDown);
+      this.canvas.removeEventListener('pointermove', this.onMove);
+      this.canvas.removeEventListener('pointerup', this.onUp);
+      this.canvas.removeEventListener('pointercancel', this.onUp);
+      this.canvas.removeEventListener('wheel', this.onWheel);
+    }
     this.model.dispose();
     this.floor.geometry.dispose();
     (this.floor.material as T.Material).dispose();

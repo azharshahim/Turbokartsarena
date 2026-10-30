@@ -11,6 +11,7 @@
  */
 
 import * as THREE from 'three';
+import { terrainForTheme } from '../core/terrain';
 import { vehicleFor } from '../game/vehicles';
 import { createVehicle } from './vehicles';
 import type { KartProfile } from '../game/roster';
@@ -18,6 +19,7 @@ import type { CircuitTheme } from '../game/circuits';
 import type { QualitySettings } from '../core/config';
 import {
   asphaltTexture,
+  terrainTexture,
   bannerTexture,
   bodyPaintTexture,
   concreteTexture,
@@ -71,7 +73,9 @@ export function createMaterials(theme: CircuitTheme, q: QualitySettings): Materi
   const paint = bodyPaintTexture(size, aniso);
   const metal = metalTexture(size, aniso);
 
-  const road = std(asphalt, 1, {
+  const terrain = terrainForTheme(theme.id);
+  const roadTexture = terrain === 'asphalt' ? asphalt : terrainTexture(terrain, size, aniso);
+  const road = std(roadTexture, 1, {
     roughness: 0.88,
     metalness: 0.03,
     color: new THREE.Color(0xffffff),
