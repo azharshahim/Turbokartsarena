@@ -1,3 +1,5 @@
+import { terrainAtProgress, type Terrain } from '../core/terrain';
+import { asphaltTexture, terrainTexture } from './textures';
 /**
  * Turbo Karts Arena — géométrie de la piste.
  *
@@ -146,7 +148,26 @@ export function buildTrackMesh(
   roadGeo.setAttribute('color', new THREE.Float32BufferAttribute(vcolors, 3));
   roadGeo.setIndex(indices);
   roadGeo.computeBoundingSphere();
-  const road = new THREE.Mesh(roadGeo, mats.road);
+  // Contiguous material groups; one shared road geometry, only textures actually
+  // used by this circuit are requested from the procedural cache.
+  const surfaces: Terrain[] = [];
+  const roadMaterials: THREE.MeshStandardMaterial[] = [];
+  for (let i = 0; i < n; i++) {
+    const surface = terrainAtProgress(theme.id, i / n);
+    let slot = surfaces.indexOf(surface);
+    if (slot < 0) {
+      slot = surfaces.length; surfaces.push(surface);
+      const maps = surface === 'asphalt' ? asphaltTexture(q.textureSize, q.anisotropy) : terrainTexture(surface, q.textureSize, q.anisotropy);
+      const material = new THREE.MeshStandardMaterial({ map: maps.albedo, normalMap: maps.normal, roughnessMap: maps.roughness, roughness: .9, vertexColors: true });
+      material.userData.terrain = surface;
+      roadMaterials.push(material); disposables.push(material);
+    }
+    const last = roadGeo.groups[roadGeo.groups.length - 1];
+    const count = (cols - 1) * 6;
+    if (last && last.materialIndex === slot) last.count += count;
+    else roadGeo.addGroup(i * count, count, slot);
+  }
+  const road = new THREE.Mesh(roadGeo, roadMaterials);
   road.receiveShadow = q.shadows;
   road.castShadow = false;
   group.add(road);

@@ -19,3 +19,28 @@ export function terrainFactors(theme: string, bike: boolean) {
   const p = TERRAIN_PHYSICS[terrainForTheme(theme)];
   return { grip: bike ? 1 - (1 - p.grip) * 0.85 : p.grip, acceleration: p.acceleration };
 }
+
+/** Normalized lap intervals. Render boundaries are snapped to the same track
+ * samples as physics, so the visible material never differs from the contact. */
+export interface TerrainSection { start: number; end: number; terrain: Terrain }
+const SECTIONS: Record<string, TerrainSection[]> = {
+  coast: [{ start: .32, end: .43, terrain: 'sand' }],
+  desert: [{ start: .5, end: .65, terrain: 'sand' }],
+  alpine: [{ start: .55, end: .72, terrain: 'asphalt' }],
+  sahara: [{ start: .27, end: .4, terrain: 'gravel' }],
+  jungle: [{ start: .48, end: .62, terrain: 'gravel' }],
+  mediterranean: [{ start: .62, end: .74, terrain: 'gravel' }],
+  alpes: [{ start: .3, end: .4, terrain: 'asphalt' }],
+  ocean: [{ start: .12, end: .25, terrain: 'sand' }],
+  tropical: [{ start: .5, end: .62, terrain: 'asphalt' }],
+  volcanic: [{ start: .55, end: .66, terrain: 'asphalt' }],
+};
+export function terrainAtProgress(theme: string, progress: number): Terrain {
+  const t = ((progress % 1) + 1) % 1;
+  for (const section of SECTIONS[theme] ?? []) if (t >= section.start && t < section.end) return section.terrain;
+  return terrainForTheme(theme);
+}
+export function terrainFactorsFor(surface: Terrain, bike: boolean) {
+  const p = TERRAIN_PHYSICS[surface];
+  return { grip: bike ? 1 - (1 - p.grip) * .85 : p.grip, acceleration: p.acceleration };
+}

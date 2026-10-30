@@ -54,6 +54,7 @@ interface Settings {
   quality: QualityLevel | 'auto';
   gyro: boolean;
   sound: boolean;
+  reducedMotion: boolean;
   laps: number;
   vehicle: number;
   difficulty: Difficulty;
@@ -63,6 +64,7 @@ const DEFAULT_SETTINGS: Settings = {
   quality: 'auto',
   gyro: false,
   sound: false,
+  reducedMotion: false,
   laps: 3,
   vehicle: 0,
   difficulty: 'arcade',
@@ -418,6 +420,7 @@ export default function App() {
         height: dims.height,
         pixelRatio: 1, // expo-gl rend déjà à la résolution du framebuffer natif
         quality: QUALITY[level],
+        reducedMotion: settings.reducedMotion,
         circuit,
         profile,
         laps: settings.laps,
@@ -619,13 +622,19 @@ export default function App() {
 /* ------------------------------------------------------------------ */
 
 /** GL garage uses the same mesh factory as the race, and releases its frame loop. */
-const NativeGarage: React.FC<{ profile: KartProfile }> = ({ profile }) => {
+const NativeGarage: React.FC<{ profile: KartProfile; circuit: Circuit; reducedMotion: boolean; premium?: boolean }> = ({ profile, circuit, reducedMotion, premium = false }) => {
   const showroom = useRef<Showroom | null>(null);
   const raf = useRef<number>(0);
   const gesture = useRef({ x: 0, distance: 0 });
   useEffect(() => {
     showroom.current?.select(profile);
   }, [profile.id, profile.vehicleId]);
+  useEffect(() => {
+    if (!showroom.current) return;
+    showroom.current.reducedMotion = reducedMotion;
+    showroom.current.setCircuit(circuit);
+    showroom.current.setBackdropVisible(!premium);
+  }, [circuit.id, reducedMotion, premium]);
   useEffect(
     () => () => {
       cancelAnimationFrame(raf.current);
@@ -655,6 +664,9 @@ const NativeGarage: React.FC<{ profile: KartProfile }> = ({ profile }) => {
       }}
       onContextCreate={(gl: any) => {
         showroom.current = new Showroom(null, profile, gl);
+        showroom.current.reducedMotion = reducedMotion;
+        showroom.current.setCircuit(circuit);
+        showroom.current.setBackdropVisible(!premium);
         const frame = (time: number) => {
           if (!showroom.current) return;
           showroom.current.frame(time, gl.drawingBufferWidth, gl.drawingBufferHeight);
@@ -717,7 +729,7 @@ const MenuScreen: React.FC<{
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               {['MES VÉHICULES', 'BOUTIQUE', 'AMÉLIORATIONS'].map((label, i) => <TouchableOpacity key={label} accessibilityState={{ selected: garageTab === i }} style={[styles.toolButton, { borderColor: garageTab === i ? '#64e5ff' : '#34516c' }]} onPress={() => setGarageTab(i)}><Text style={styles.toolText}>{label}</Text></TouchableOpacity>)}
             </View>
-            {garageOpen && <NativeGarage profile={profile} />}
+            {garageOpen && <NativeGarage profile={profile} circuit={circuit} reducedMotion={settings.reducedMotion} premium />}
             <Text style={{ color: '#ffd866', fontSize: 18 }}>{garage.coins} Turbo Coins · {vehicle.price ?? 0} TC</Text>
             <Text style={{ color: 'white', fontSize: 22 }}>{vehicle.name}</Text>
             <Text style={{ color: '#b1cee4' }}>{vehicle.description}</Text>
@@ -740,7 +752,7 @@ const MenuScreen: React.FC<{
           </ScrollView>
         </SafeAreaView>
       </Modal>
-      {!garageOpen && <NativeGarage profile={profile} />}
+      {!garageOpen && <NativeGarage profile={profile} circuit={circuit} reducedMotion={settings.reducedMotion} />}
       <View style={styles.menuGlow} />
       <Text style={styles.logo}>
         TURBO<Text style={styles.logoAccent}> KARTS</Text>
@@ -841,6 +853,9 @@ const MenuScreen: React.FC<{
         <Text style={styles.playText}>{owned ? 'COURSE' : 'VERROUILLÉ'}</Text>
       </TouchableOpacity>
 
+      <TouchableOpacity style={styles.toolButton} onPress={() => setSettings({ ...settings, reducedMotion: !settings.reducedMotion })}>
+        <Text style={styles.toolText}>Animations : {settings.reducedMotion ? 'réduites' : 'complètes'}</Text>
+      </TouchableOpacity>
       <View style={styles.menuTools}>
         <TouchableOpacity
           style={styles.toolButton}

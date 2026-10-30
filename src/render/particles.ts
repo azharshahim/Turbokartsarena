@@ -1,3 +1,4 @@
+import type { Terrain } from '../core/terrain';
 /**
  * Turbo Karts Arena — particules GPU-friendly avec pooling.
  *
@@ -123,6 +124,10 @@ export class ParticleSystem {
     this.points.renderOrder = 20;
   }
 
+  tint(a: number, b: number, gravity: number) {
+    this.opts.colorA.setHex(a); this.opts.colorB.setHex(b); this.gravity = gravity;
+  }
+
   /** Émet une particule. Les arguments sont volontairement positionnels (zéro allocation). */
   emit(
     x: number,
@@ -232,6 +237,7 @@ export class EffectsRegistry {
   dust: ParticleSystem;
   splash: ParticleSystem;
   confetti: ParticleSystem;
+  debris: ParticleSystem;
 
   constructor(textures: { smoke: THREE.Texture; glow: THREE.Texture }, budget: number) {
     this.smoke = new ParticleSystem({
@@ -258,7 +264,7 @@ export class EffectsRegistry {
       grow: 0.4,
     });
     this.dust = new ParticleSystem({
-      capacity: Math.max(30, Math.floor(budget * 0.18)),
+      capacity: Math.max(30, Math.floor(budget * 0.10)),
       texture: textures.smoke,
       size: [1, 1],
       colorA: new THREE.Color(0xd8c39a),
@@ -279,6 +285,11 @@ export class EffectsRegistry {
       opacity: 0.85,
       grow: 0.6,
     });
+    this.debris = new ParticleSystem({
+      capacity: Math.max(16, Math.floor(budget * .08)), texture: textures.smoke,
+      size: [1, 1], colorA: new THREE.Color(0xffffff), colorB: new THREE.Color(0xbac8db),
+      gravity: -8, drag: 1.2, opacity: .8, grow: .2,
+    });
     this.confetti = new ParticleSystem({
       capacity: 240,
       texture: textures.glow,
@@ -293,7 +304,7 @@ export class EffectsRegistry {
   }
 
   all() {
-    return [this.smoke, this.sparks, this.dust, this.splash, this.confetti];
+    return [this.smoke, this.sparks, this.dust, this.splash, this.confetti, this.debris];
   }
 
   /** Fumée + étincelles de dérapage. `tier` colore les étincelles. */
@@ -379,6 +390,24 @@ export class EffectsRegistry {
     }
   }
 
+  surfaceSpray(surface: Terrain, x: number, y: number, z: number, speed: number, heading: number, dt: number) {
+    if (surface === 'asphalt' || speed < 3 || Math.random() > Math.min(1, dt * (8 + speed * .7))) return;
+    const snowy = surface === 'snow', gravel = surface === 'gravel' || surface === 'volcanic';
+    const color = snowy ? 0xf0f9ff : surface === 'sand' ? 0xe5c282 : surface === 'dirt' ? 0x9e6940 : 0x73737a;
+    this.debris.tint(color, snowy ? 0xb5daed : 0x645342, gravel ? -13 : -4);
+    for (const side of [-1, 1]) {
+      const x0 = x + Math.cos(heading) * side * .65 - Math.sin(heading), z0 = z - Math.sin(heading) * side * .65 - Math.cos(heading);
+      this.debris.emit(x0, y + .15, z0, -Math.sin(heading) * speed * .15 + side, 1.5 + Math.random() * 2, -Math.cos(heading) * speed * .15,
+        gravel ? .09 : snowy ? .3 : .5, gravel ? .5 : .85, Math.random(), snowy ? 1.4 : .5);
+    }
+  }
+  giftBurst(x: number, y: number, z: number) {
+    for (let i = 0; i < 24; i++) {
+      const angle = i / 24 * Math.PI * 2;
+      this.confetti.emit(x, y + 1, z, Math.cos(angle) * 4, 2 + Math.random() * 3, Math.sin(angle) * 4, .2, .8);
+    }
+  }
+
   impact(x: number, y: number, z: number, power: number) {
     const n = Math.min(26, 6 + Math.floor(power * 3));
     for (let i = 0; i < n; i++) {
@@ -422,6 +451,7 @@ export class EffectsRegistry {
     this.dust.update(dt);
     this.splash.update(dt);
     this.confetti.update(dt);
+    this.debris.update(dt);
   }
 
   setSizeScale(v: number) {

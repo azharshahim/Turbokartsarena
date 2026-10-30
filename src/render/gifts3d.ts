@@ -13,11 +13,30 @@ export function createGiftMesh(gift: Gift): THREE.Group {
   bow.position.y = 0.82;
   const halo = new THREE.Mesh(new THREE.TorusGeometry(1.05, 0.055, 6, 24), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.65, depthWrite: false }));
   halo.rotation.x = Math.PI / 2; halo.position.y = -0.8;
-  g.add(box, ribbon1, ribbon2, bow, halo);
+  const badge = new THREE.Group();
+  badge.position.z = .73;
+  const symbolMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  // Six silhouettes rather than relying on color alone; no font or texture load.
+  const add = (geometry: THREE.BufferGeometry, x = 0, y = 0) => {
+    const symbol = new THREE.Mesh(geometry, symbolMat); symbol.position.set(x, y, 0); badge.add(symbol); return symbol;
+  };
+  if (gift.kind === 'repair') { add(new THREE.BoxGeometry(.48, .13, .04)); add(new THREE.BoxGeometry(.13, .48, .04)); }
+  else if (gift.kind === 'coins') { add(new THREE.TorusGeometry(.24, .055, 5, 16)); add(new THREE.BoxGeometry(.06, .3, .03)); }
+  else if (gift.kind === 'shield') add(new THREE.CircleGeometry(.28, 5)).rotation.z = Math.PI / 2;
+  else if (gift.kind === 'weapon') { add(new THREE.TorusGeometry(.23, .035, 4, 16)); add(new THREE.BoxGeometry(.6, .04, .03)); add(new THREE.BoxGeometry(.04, .6, .03)); }
+  else { const arrow = add(new THREE.ConeGeometry(.19, .4, 3), 0, .03); arrow.rotation.z = -.4; if (gift.kind === 'superTurbo') add(new THREE.ConeGeometry(.13, .28, 3), .22, -.1).rotation.z = -.4; }
+  g.add(box, ribbon1, ribbon2, bow, halo, badge);
   g.userData.giftId = gift.id; return g;
 }
+export function collectGiftMesh(mesh: THREE.Group, time: number) { mesh.userData.collectedAt = time; }
 export function updateGiftMesh(mesh: THREE.Group, gift: Gift, t: number): void {
-  mesh.visible = gift.active; mesh.rotation.y = giftRotation(t, gift.id); mesh.position.y = giftBobY(t, gift.id);
+  const age = typeof mesh.userData.collectedAt === 'number' ? t - mesh.userData.collectedAt : Infinity;
+  const collecting = !gift.active && age >= 0 && age < .55;
+  mesh.visible = gift.active || collecting;
+  mesh.scale.setScalar(collecting ? 1 + age * 1.4 : 1);
+  mesh.rotation.y = giftRotation(t, gift.id) + (collecting ? age * 9 : 0);
+  mesh.position.y = giftBobY(t, gift.id) + (collecting ? age * 3 : 0);
+  if (gift.active) delete mesh.userData.collectedAt;
 }
 export function createShieldBubble(): THREE.Mesh {
   return new THREE.Mesh(new THREE.SphereGeometry(1.9, 20, 14), new THREE.MeshPhysicalMaterial({ color: 0x6ee7ff, transparent: true, opacity: 0.22, roughness: 0.1, metalness: 0, side: THREE.DoubleSide }));

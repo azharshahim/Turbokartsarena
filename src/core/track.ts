@@ -1,3 +1,4 @@
+import { terrainAtProgress, type Terrain } from './terrain';
 /**
  * Turbo Karts Arena — piste 3D.
  *
@@ -66,6 +67,7 @@ export interface TrackQuery {
   lateral: number;
   halfWidth: number;
   surface: SurfaceKind;
+  terrain: Terrain;
   y: number;
   curvature: number;
   onRoad: boolean;
@@ -360,6 +362,7 @@ export class Track {
       lateral,
       halfWidth: p.halfWidth,
       surface,
+      terrain: terrainAtProgress(this.layout.theme, Math.floor((p.s + along) / this.step) / this.count),
       y,
       curvature: p.curvature,
       onRoad: absLat <= p.halfWidth,

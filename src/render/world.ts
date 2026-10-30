@@ -1,3 +1,4 @@
+import { CinematicScenery } from './cinematicScenery';
 /**
  * Turbo Karts Arena — moteur de rendu PARTAGÉ.
  *
@@ -42,7 +43,7 @@ import { EffectsRegistry } from './particles';
 import { buildEnvironment, SkyDome } from './sky';
 import { glowTexture, smokeTexture } from './textures';
 import { aiShouldFire, applyHit, fireWeapon, makeRacer, pickupGift, projectileHits, recoverSpeed, spawnGifts, stepProjectile, updateGifts, type Gift, type Projectile, type RacerCombat, type WeaponKind } from '../core/powerups';
-import { createGiftMesh, createShieldBubble, updateGiftMesh } from './gifts3d';
+import { createGiftMesh, createShieldBubble, updateGiftMesh, collectGiftMesh } from './gifts3d';
 
 export interface EngineOptions {
   /** Contexte WebGL (expo-gl) ou null si `canvas` est fourni. */
@@ -55,6 +56,8 @@ export interface EngineOptions {
   circuit: Circuit;
   profile: KartProfile;
   laps: number;
+  reducedMotion?: boolean;
+  onGiftPickup?: () => void;
   difficulty?: Difficulty;
   onFrame?: (dt: number) => void;
   onFinish?: () => void;
@@ -81,6 +84,10 @@ export class PhysicsEngine {
   private sky: SkyDome;
   private materials: MaterialLibrary;
   private scenery: SceneryResult;
+  private cinematicScenery: CinematicScenery;
+  private windUniforms: Array<{ value: number }> = [];
+  reducedMotion = false;
+  private onGiftPickup?: () => void;
   readonly roadside: ReturnType<typeof createRoadside>;
   private trackMesh: TrackMesh;
   private effects: EffectsRegistry;
@@ -245,6 +252,8 @@ export class PhysicsEngine {
     terrainGeo.rotateX(-Math.PI / 2);
     const pos = terrainGeo.getAttribute('position') as THREE.BufferAttribute;
     const track = this.race.track;
+    const seaFloor = Math.min(...track.samples.map(p => p.y)) - 10;
+    const coastal = ['ocean', 'coast', 'mediterranean', 'volcanic'].includes(this.theme.id);
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
       const z = pos.getZ(i);
@@ -269,7 +278,7 @@ export class PhysicsEngine {
           valley = Math.max(valley, Math.pow(along, 0.6) * 8 * (1 - smoothstep(3, 18, over)));
         }
       }
-      pos.setY(i, h - clearance - valley);
+      pos.setY(i, coastal ? lerp(h - clearance - valley, seaFloor, smoothstep(24, 70, over)) : h - clearance - valley);
     }
     terrainGeo.computeVertexNormals();
     const groundMesh = new THREE.Mesh(terrainGeo, this.materials.grass);
@@ -296,6 +305,16 @@ export class PhysicsEngine {
     }));
     this.scenery = createScenery(this.theme, this.materials, this.quality, trackPoints, opts.circuit.seed);
     this.scene.add(this.scenery.group);
+    this.scenery.group.traverse(o => {
+      if (o instanceof THREE.Mesh) {
+        const list = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of list) if (m.userData.windTime && !this.windUniforms.includes(m.userData.windTime)) this.windUniforms.push(m.userData.windTime);
+      }
+    });
+    this.reducedMotion = opts.reducedMotion ?? false;
+    this.onGiftPickup = opts.onGiftPickup;
+    this.cinematicScenery = new CinematicScenery(track, this.quality, opts.circuit.seed);
+    this.scene.add(this.cinematicScenery.group);
     this.roadside = createRoadside(this.race.track, opts.circuit, this.quality);
     this.scene.add(this.roadside.group);
     if (opts.circuit.rain) {
@@ -433,10 +452,14 @@ export class PhysicsEngine {
     this.syncKarts(dt);
     this.roadside.update(dt, this.player.state.x, this.player.state.y, this.player.state.z);
     this.updateCamera(dt);
-    this.sky.update(this.camera, this.elapsed);
+    this.sky.update(this.camera, this.reducedMotion ? 0 : this.elapsed);
     this.trackMesh.update(this.elapsed, 1);
 
+    this.cinematicScenery.update(this.elapsed, this.player.state, this.reducedMotion);
+    // Shared foliage uniforms, discovered once in constructor below.
+    for (const uniform of this.windUniforms) uniform.value = this.reducedMotion ? 0 : this.elapsed;
     for (const a of this.scenery.animated) {
+      if (this.reducedMotion) continue;
       if (a.kind === 'bob') {
         a.obj.position.y += Math.sin(this.elapsed * a.speed + a.phase) * dt * 0.6;
         a.obj.rotation.y += dt * a.speed;
@@ -538,6 +561,18 @@ export class PhysicsEngine {
       }
       for (const fw of model.frontWheels) fw.rotation.y = steerAngle;
 
+      if (!this.reducedMotion && Math.abs(st.speed) > 3) {
+        const contact = this.race.track.query(st.x, st.z, st.trackIndex);
+        this.effects.surfaceSpray(contact.terrain, st.x, st.y, st.z, Math.abs(st.speed), st.heading, dt);
+        // Wheel carrier travel, not a whole-model bob. Spin/steering pivots stay intact.
+        for (let w = 0; w < model.wheels.length; w++) {
+          const pivot = model.wheels[w].parent;
+          if (pivot) {
+            const rest = model.root.userData.wheelRadius ?? .34;
+            pivot.position.y = rest + Math.sin(this.elapsed * (12 + Math.abs(st.speed) * .4) + w * 1.6) * (contact.terrain === 'asphalt' ? .012 : .045);
+          }
+        }
+      }
       // pilote : se penche dans les virages
       model.driver.body.rotation.z = -st.steer * 0.22;
       model.driver.head.rotation.y = st.steer * 0.3;
@@ -601,7 +636,7 @@ export class PhysicsEngine {
 
     // tremblement d'impact
     this.shake = Math.max(0, this.shake - dt * 2.2);
-    const shakeAmp = this.shake * 0.28;
+    const shakeAmp = this.reducedMotion ? 0 : this.shake * 0.28;
     this.camera.position.set(
       this.camPos.x + (Math.random() - 0.5) * shakeAmp,
       this.camPos.y + (Math.random() - 0.5) * shakeAmp,
@@ -614,11 +649,19 @@ export class PhysicsEngine {
       st.y + 1.25,
       st.z + Math.cos(st.heading) * lookAhead,
     );
+    if (!this.reducedMotion && (this.race.phase === 'countdown' || this.race.phase === 'finished')) {
+      const intro = this.race.phase === 'countdown';
+      const turn = intro ? Math.max(0, this.race.countdown - .6) / 2.6 * 1.3 : this.elapsed * .7;
+      const angle = st.heading + turn;
+      this.camera.position.set(st.x - Math.sin(angle) * 7, st.y + (intro ? 3.5 : 2.5), st.z - Math.cos(angle) * 7);
+      this.camLook.set(st.x, st.y + .9, st.z);
+      this.camPos.copy(this.camera.position);
+    }
     this.camera.lookAt(this.camLook);
 
     // FOV dynamique : effet de vitesse + coup de zoom au turbo
     const boost = kart.isBoosting ? 1 : 0;
-    const fovTarget = 60 + speedNorm * 8 + boost * 6 + (st.drifting ? 2 : 0);
+    const fovTarget = this.reducedMotion ? 60 : 60 + speedNorm * 8 + boost * 6 + (st.drifting ? 2 : 0);
     this.camFov = damp(this.camFov, fovTarget, 4.5, dt);
     if (Math.abs(this.camera.fov - this.camFov) > 0.05) {
       this.camera.fov = this.camFov;
@@ -647,15 +690,17 @@ export class PhysicsEngine {
     const st = kart.state;
     const speedNorm = clamp(Math.abs(st.speed) / (PHYSICS.kart.maxSpeed * 1.25), 0, 1);
     const u = this.postfx.speedPass.uniforms;
-    u.uTime.value = this.elapsed;
+    u.uTime.value = this.reducedMotion ? 0 : this.elapsed;
+    u.uMotionBlur.value = !this.reducedMotion && this.quality.motionBlur ? 1 : 0;
+    u.uSpeedLines.value = !this.reducedMotion && this.quality.speedLines ? 1 : 0;
     u.uSpeed.value = damp(u.uSpeed.value as number, speedNorm, 6, dt);
     u.uBoost.value = damp(u.uBoost.value as number, kart.isBoosting ? 1 : 0, 8, dt);
     u.uBoostTier.value = st.boostTier;
-    u.uFlash.value = damp(u.uFlash.value as number, st.driftReleasedTime > 0 ? 0.16 : 0, 14, dt);
+    u.uFlash.value = damp(u.uFlash.value as number, !this.reducedMotion && st.driftReleasedTime > 0 ? 0.16 : 0, 14, dt);
     const flashCol = st.boostTier >= 3 ? 0xc65cff : st.boostTier === 2 ? 0xff9a2e : 0x40c8ff;
     (u.uFlashColor.value as THREE.Color).setHex(flashCol);
     // aberration qui monte avec la vitesse
-    u.uAberration.value = this.quality.chromatic ? 0.0012 + speedNorm * 0.0022 : 0;
+    u.uAberration.value = !this.reducedMotion && this.quality.chromatic ? 0.0012 + speedNorm * 0.0022 : 0;
     if (this.postfx.bloomPass) {
       this.postfx.bloomPass.strength =
         this.quality.bloomStrength * (0.7 + speedNorm * 0.35 + (kart.isBoosting ? 0.45 : 0));
@@ -755,6 +800,11 @@ export class PhysicsEngine {
         const dist = Math.hypot(st.x - gp.x, st.z - gp.z);
         const before = c.weapon;
         if (pickupGift(c, g, now, dist)) {
+          if (!this.reducedMotion) {
+            collectGiftMesh(this.giftMeshes[gi], now);
+            this.effects.giftBurst(gp.x, gp.y, gp.z);
+          }
+          if (i === 0) this.onGiftPickup?.();
           if (g.kind === 'weapon') c.weapon = WEAPONS[g.id % WEAPONS.length];
           if (i === 0) {
             this.combatEvent = { turbo: 'Turbo !', superTurbo: 'Super Turbo !', shield: 'Bouclier actif !', repair: 'Réparé !', coins: '+5 Turbo Coins', weapon: 'Arme récupérée !' }[g.kind];
@@ -830,6 +880,7 @@ export class PhysicsEngine {
     this.trackMesh.dispose();
     this.terrain?.geometry.dispose();
     this.scenery.dispose();
+    this.cinematicScenery.dispose();
     this.roadside.dispose();
     this.materials.dispose();
     this.sky.dispose();

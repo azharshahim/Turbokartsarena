@@ -1,4 +1,4 @@
-import { terrainFactors } from './terrain';
+import { terrainFactorsFor } from './terrain';
 /**
  * Turbo Karts Arena — modèle physique du kart (arcade).
  *
@@ -383,7 +383,7 @@ export class Kart {
     /* ---------- 5. forces longitudinales ---------- */
     const throttle = clamp(input.throttle, 0, 1);
     const grassPenalty = st.surface === 'grass' ? 0.7 : st.surface === 'curb' ? 0.97 : 1;
-    const terrain = st.surface === 'grass' ? { grip: 1, acceleration: 1 } : terrainFactors(track.layout.theme, this.stats.bike);
+    const terrain = st.surface === 'grass' ? { grip: 1, acceleration: 1 } : terrainFactorsFor(q.terrain, this.stats.bike);
 
     const fwdX = Math.sin(st.heading);
     const fwdZ = Math.cos(st.heading);

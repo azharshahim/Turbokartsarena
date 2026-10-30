@@ -27,6 +27,7 @@ try {
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
+    page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
     await mkdir(`.preview/comparison/${version}`, { recursive: true });
     const go = async () => { await page.goto(`http://127.0.0.1:${server.address().port}${path}`); await page.waitForFunction(() => !!window.__tka); };
     const shot = async name => {
@@ -54,7 +55,7 @@ try {
       assert.match(await page.locator('#premiumList button').first().textContent(), /1\/5/);
       await page.click('#closeGarage');
     } else await shot('garage');
-    for (const [name, circuit] of [['desert', 5], ['tropical', 10], ['neige', 8], ['cadeau', 0]]) {
+    for (const [name, circuit] of [['desert', 5], ['tropical', 10], ['neige', 8], ['cadeau', 0], ['volcanique', 11], ['urbain', 4]]) {
       await go();
       await page.evaluate(circuit => window.__tka.start({ circuit, vehicle: 0, quality: 'ultra' }), circuit);
       await page.waitForFunction(() => !!window.__tka.engine());
@@ -70,6 +71,7 @@ try {
         e.camera.lookAt(gift.position);
         e.renderer.render(e.scene, e.camera);
       });
+      assert.ok(await page.evaluate(() => window.__tka.engine().renderer.info.render.triangles > 0), `${version}/${name}: actual triangles rendered`);
       await shot(name);
     }
     assert.deepEqual(errors, [], `${version}: browser exceptions`);
