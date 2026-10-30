@@ -436,6 +436,19 @@ export default function App() {
     setControlMessage(`Position neutre enregistrée (${degrees.toFixed(0)}°).`);
   }, [settings.controls.steerMode]);
 
+  /* Recentrage en course : neutre rejoint la position actuelle sans à-coup. */
+  const recenterGyro = useCallback(() => {
+    const g = gyroRef.current;
+    if (settings.controls.steerMode !== 'gyro' || !g.hasSample) {
+      setControlMessage('Activez le gyroscope pour recentrer la direction.');
+      return;
+    }
+    const tilt = tiltRef.current;
+    tilt.push(g.beta, g.gamma, g.orientation, 1 / 60, Date.now());
+    tilt.recenter();
+    setControlMessage('Direction recentrée — le kart revient droit sans à-coup.');
+  }, [settings.controls.steerMode]);
+
   /* ---------------- boucle de HUD ---------------- */
   const startHudLoop = useCallback(() => {
     if (hudTimer.current !== null) clearInterval(hudTimer.current);
@@ -748,6 +761,7 @@ export default function App() {
             pressed={pressedButtons}
             onZoneRect={setZoneRect}
             onPause={pauseRace}
+            onRecenter={recenterGyro}
             gyro={settings.controls.steerMode === 'gyro' && hud.gyroLive}
             manualThrottle={settings.controls.throttleMode === 'manual'}
             bike={VEHICLES[settings.vehicle].kind !== 'kart'}
@@ -1268,12 +1282,14 @@ const TouchHud: React.FC<{
   pressed: HeldButtons;
   onZoneRect: (id: TouchZoneId, rect: TouchZoneRect | null) => void;
   onPause: () => void;
+  /** Recentrage progressif du neutre (bouton affiché seulement en mode gyroscope). */
+  onRecenter: () => void;
   /** Gyroscope réellement utilisable (données reçues), pas seulement demandé. */
   gyro: boolean;
   manualThrottle: boolean;
   bike: boolean;
   paused: boolean;
-}> = ({ hud, pressed, onZoneRect, onPause, gyro, manualThrottle, bike, paused }) => {
+}> = ({ hud, pressed, onZoneRect, onPause, onRecenter, gyro, manualThrottle, bike, paused }) => {
   const turbo = hud.turbo ?? { ready: false, active: false, charge: 0, cooldown: 0, mastery: false, masteryCount: 0 };
   const turboLabel = turbo.active
     ? 'TURBO !'
@@ -1356,6 +1372,16 @@ const TouchHud: React.FC<{
           <View style={[styles.gyroDot, gyro && styles.gyroDotOn]} />
           <Text style={[styles.gyroChipText, gyro && { color: '#4dffc8' }]}>{gyro ? 'GYRO' : 'BOUTONS'}</Text>
         </View>
+        {gyro && (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Recentrer la direction gyroscopique"
+            onPress={onRecenter}
+            style={styles.recenterButton}
+          >
+            <Text style={styles.recenterText}>RECENTRER</Text>
+          </TouchableOpacity>
+        )}
         <View
           ref={pauseBtnRef}
           collapsable={false}
@@ -1833,6 +1859,19 @@ const styles = StyleSheet.create({
   },
   pauseMenuAction: { backgroundColor: '#121a33' },
   pauseControls: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginTop: 8 },
+  recenterButton: {
+    height: 44,
+    minWidth: 104,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#4dffc866',
+    backgroundColor: '#0a1a22cc',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  recenterText: { color: '#bff7e8', fontSize: 11, fontWeight: '900', letterSpacing: 1.2 },
   versionBadge: { color: '#46577e', fontSize: 10, letterSpacing: 1.6, fontWeight: '700', marginTop: 4 },
   pauseActionText: { color: '#eaf0ff', fontSize: 15, fontWeight: '900', letterSpacing: 1 },
   countdownOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },

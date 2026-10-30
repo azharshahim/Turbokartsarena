@@ -192,6 +192,9 @@ try {
   const startSensorStream = (beta, gamma) =>
     page.evaluate(
       ([b, g]) => {
+        // Autorisation SIMULÉE : Chrome récent expose requestPermission (qui
+        // exige un geste utilisateur) ; le reste du scénario reste identique.
+        DeviceOrientationEvent.requestPermission = async () => 'granted';
         if (window.__sensorTimer) clearInterval(window.__sensorTimer);
         const fire = () =>
           window.dispatchEvent(

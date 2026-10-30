@@ -163,9 +163,14 @@ Propriétés garanties (et verrouillées par `test:mission11` §5) :
 
 | Réglage | Zone morte | Course max | Lissage | Vitesse max |
 |---|---|---|---|---|
-| **Doux** | 4,5° | 32° | 9 /s | 2,2 /s |
-| **Normal** (défaut) | 3° | 21° | 15 /s | 4,2 /s |
-| **Sport** | 2° | 13° | 22 /s | 7 /s |
+| **Doux** | 5,1° | 34° | 8 /s | 2 /s |
+| **Normal** (défaut) | 3° | 24° | 13 /s | 3,4 /s |
+| **Sport** | 2,1° | 16° | 19 /s | 5,5 /s |
+
+> Valeurs ajustées par le **correctif de stabilisation** (§11) : la zone morte de
+> référence vaut `GYRO_DEADZONE_DEG = 3` en mode Normal et les autres modes en
+> dérivent (`GYRO_DEADZONE_SCALE`). Le lissage est en plus **adaptatif** : ×0,55
+> près du centre (tremblement absorbé), ×1 dès qu'on incline (réponse franche).
 
 Courbe de réponse : `t²(3−2t)·0.35 + t·0.65` — précision autour du centre,
 verrouillage franc en butée.
@@ -463,3 +468,124 @@ Samsung réel (§8).
 - Pas de refonte audio (le son n'existe pas encore).
 - Pas de refonte de l'IA ni des collisions.
 - Pas de merge, pas de publication, pas d'APK manuel.
+
+---
+
+## 11. Correctif de stabilisation de la direction (retour après PR nº 9)
+
+> **Statut** : implémenté, testé **en simulation** ; validation sur un Samsung réel
+> **non effectuée**. Rien n'est fusionné ni publié : la V4.1.0 n'est pas déclarée
+> stable.
+
+### 11.1 Constat (audit de la chaîne existante)
+
+Le kart restait difficile à tenir droit sur Android/Samsung malgré la §3. En
+relisant `src/core/gyro.ts`, quatre causes cumulatives expliquent le ressenti :
+
+1. **Zone morte effective trop faible** : 3° de zone morte, mais un lissage fort
+   qui laissait encore passer les micro-inclinaisons du poignet ; l'axe
+   `beta/gamma` change de sens selon la prise en main, donc un tremblement de 1–2°
+   suffisait à sortir du centre.
+2. **Lissage uniforme** : le même filtre servait près du centre (où il faut
+   beaucoup de filtrage) et en virage (où il faut de la réactivité). Impossible de
+   régler l'un sans dégrader l'autre.
+3. **Dérive du poignet non compensée** : la position neutre restait figée sur la
+   calibration. Au bout de quelques secondes, tenir le téléphone « naturellement »
+   ne correspondait plus au zéro → le kart tirait d'un côté.
+4. **Recalibrage instantané** : `calibrate()` déplaçait le neutre d'un coup, ce qui
+   produisait un saut de direction (et donc un à-coup) si l'on recalibrait en
+   course.
+
+### 11.2 Correctifs (`src/core/gyro.ts`)
+
+| Correctif | Réglage | Effet |
+|---|---|---|
+| Zone morte de référence, réglable en **un seul endroit** | `GYRO_DEADZONE_DEG = 3` | en dessous : direction strictement au centre |
+| Zone morte par sensibilité | `GYRO_DEADZONE_SCALE` = 1,7 / 1 / 0,7 | Doux plus tolérant, Sport plus précis |
+| Lissage **adaptatif** | `GYRO_NEAR_CENTER_DAMPING = 0.55` | ×0,55 près du centre, ×1 en virage |
+| Recalage auto du neutre (anti-dérive) | `GYRO_TRIM_DELAY_S = 0.9`, `GYRO_TRIM_RATE = 0.5`, `GYRO_TRIM_MOTION_LIMIT = 6°/s`, `GYRO_TRIM_LIMIT_DEG = 10` | la dérive lente est absorbée **dans** la zone morte ; un vrai virage (> 6°/s ou > 10°) n'est jamais annulé |
+| Recentrage progressif | `GYRO_RECENTER_RATE = 7` | le neutre rejoint la position actuelle en ~0,3 s, sans saut |
+| Re-cadrage à la rotation d'écran | `GYRO_ROTATION_SHIFT_LIMIT = 45` | le braquage est conservé à l'identique (aucun coup de volant en tournant le téléphone) |
+| Limite de vitesse conservée | `GYRO_MAX_RATE` (2 / 3,4 / 5,5 par s) | aucune variation brutale possible |
+
+Aucune constante de gameplay, de circuit, de garage ou de rendu n'est touchée.
+
+### 11.3 Bouton « RECENTRER » en course
+
+- **Web** (`preview/index.html`, `preview/main.ts`) : bouton `RECENTRER` dans la
+  barre du haut, 44 px de haut, affiché **uniquement** quand le gyroscope est
+  réellement actif (`body.gyro-on`), à gauche de `PAUSE` sans chevauchement.
+  Raccourci clavier `R` en course. Il appelle `tilt.recenter()` (progressif) et
+  n'écrit **pas** dans les réglages persistés : c'est une aide de session.
+- **Expo / Android natif** (`App.tsx`) : même bouton dans le HUD tactile, visible
+  seulement si `gyro` est actif, message « Direction recentrée — le kart revient
+  droit sans à-coup. ».
+- Le bouton `RECALIBRER` du menu/pause reste disponible : lui enregistre le neutre.
+
+### 11.4 Tests ajoutés / mis à jour
+
+| Suite | Commande | Résultat |
+|---|---|---|
+| Direction gyroscopique (nouvelle) | `npm run test:gyro` | **46 vérifications ✅** |
+| Commandes / gyro / version (mission 11) | `npm run test:mission11` | ✅ |
+| Audit mission 12 | `npm run test:mission12` | 184 vérifications ✅ |
+| Version / build | `npm run test:build-id` | ✅ |
+| Paysage Android + RECENTRER (navigateur) | `npm run test:browser:android:layout` | ✅ 5 écrans |
+| Commandes mission 11 (navigateur) | `npm run test:browser:mission11` | ✅ |
+
+`tools/tests-gyro-stability.ts` (9 blocs) couvre exactement les critères demandés :
+
+1. **téléphone immobile** (bruit ±1°, 5 s de course) : écart latéral < 0,1 m ;
+2. **petites vibrations** (2,5° à 4 Hz) : `|steer|` reste à 0,000 ;
+3. **inclinaison progressive** (24° en 2 s) : braquage monotone, > 0,6 à la fin,
+   50 % atteint en < 1,6 s, aucun dépassement ;
+4. **retour au centre** : la direction revient à 0 ;
+5. **recalibrage / recentrage** : variation bornée par `maxRate·dt` (aucun à-coup) ;
+6. **orientations 0° / 90° / 180° / 270°** : saut ≤ `maxRate·dt` après rotation ;
+7. **dérive du poignet 6° en 20 s** : compensée ; un virage tenu n'est pas annulé ;
+8. **sensibilités** : ordre Sport > Normal > Doux, zone morte 3°, défaut = Normal ;
+9. **sans capteur** (`NaN`, `Infinity`) : mesures ignorées, aucun braquage parasite.
+
+Le test navigateur simule en plus le capteur (`deviceorientation` artificiel,
+autorisation `requestPermission` simulée) et vérifie que le bouton `RECENTRER`
+est visible, assez grand (≥ 44 px), non couvert, qu'il ne chevauche pas `PAUSE`,
+et qu'un clic rapproche le neutre de la position courante **sans à-coup**.
+
+### 11.5 Comparatif mesuré (simulation, pas un téléphone)
+
+| Scénario | Avant | Après |
+|---|---|---|
+| Poignet qui dérive de 6° en 20 s | 118,1 m d'écart latéral, `|steer|` 0,133 | **0,0 m**, `|steer|` 0,000 |
+| Bruit ±3°, vibrations ±4° à 4 Hz | `|steer|` 0,000 | `|steer|` 0,000 |
+| Geste franc de 12° | 50 % à 0,15 s, braquage 0,50 | 50 % à 0,20 s, braquage 0,42 |
+
+Ces chiffres proviennent de poses et de flux **synthétiques** exécutés sous Node
+et dans Chromium. Ils ne remplacent **pas** un essai sur le Samsung de
+l'utilisateur : le ressenti au pouce, la latence réelle du capteur et le
+comportement sous forte rotation (virages serrés, drift) restent à confirmer.
+
+### 11.6 À vérifier sur le téléphone (protocole court)
+
+1. Menu → **GYROSCOPE : ACTIVÉ**, sensibilité **NORMALE** (défaut).
+2. Téléphone immobile 10 s en ligne droite : le kart doit rester droit, sans
+   correction au pouce.
+3. Vibrations volontaires (marche, main tremblante) : pas de zigzag.
+4. Inclinaison lente puis franche : la direction suit progressivement, sans
+   dépassement.
+5. Retour au neutre : le kart se recentre seul.
+6. Bouton **RECENTRER** en course : la direction revient au centre en douceur,
+   **sans coup de volant**.
+7. Passage Doux / Normal / Sport : la différence doit être nette et ordonnée.
+8. Rotation du téléphone (portrait ↔ paysage) : aucun saut de direction.
+9. Gyroscope désactivé (ou refusé) : boutons tactiles intacts.
+
+### 11.7 Fichiers modifiés par ce correctif
+
+- `src/core/gyro.ts` — presets + stabilisation (recalage auto, recentrage doux,
+  lissage adaptatif, re-cadrage rotation) ;
+- `preview/index.html`, `preview/main.ts` — bouton `RECENTRER` en course, touche `R`,
+  `recenterGyro()` exposé à `__tka` ;
+- `App.tsx` — bouton `RECENTRER` du HUD natif ;
+- `tools/tests-gyro-stability.ts` (nouveau) + script `npm run test:gyro` ;
+- `tools/browser-android-landscape.mjs`, `tools/browser-mission11.mjs` — capteur
+  simulé, bouton `RECENTRER`, autorisation simulée.
