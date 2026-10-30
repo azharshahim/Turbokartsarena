@@ -13,7 +13,7 @@ export interface GarageState {
 export const GARAGE_STORAGE_KEY = 'turbokarts.v3.garage.v1';
 const KEY = GARAGE_STORAGE_KEY;
 export function defaultGarage(): GarageState {
-  return { coins: 500, owned: ['apex','aerion'], selected: 'apex', upgrades: {}, rewardedRaces: [], bestTimes: {}, stats: { races: 0, wins: 0, coinsCollected: 0 } };
+  return { coins: 500, owned: ['apex','vector','nomad','pulse','aerion','spectre','terra','horizon'], selected: 'apex', upgrades: {}, rewardedRaces: [], bestTimes: {}, stats: { races: 0, wins: 0, coinsCollected: 0 } }; // les 8 véhicules V2 restent débloqués
 }
 export function upgradeCost(kind: UpgradeKind, level: number): number { return 100 + level * 75 + UPGRADE_KINDS.indexOf(kind) * 10; }
 /** Multiplicateur réel appliqué aux caractéristiques : +3 % par niveau. */
