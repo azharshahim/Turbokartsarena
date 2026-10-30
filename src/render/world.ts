@@ -469,6 +469,12 @@ export class PhysicsEngine {
     }
 
     this.effects.update(dt);
+
+    // Reallocating the drawing buffer clears it. Adapt BEFORE drawing, never
+    // after the final pass / native presentation (which exposed a black frame
+    // even when the browser window had not changed size).
+    this.frameAvg = lerp(this.frameAvg, dt, 0.08);
+    this.adaptResolution(dt);
     this.updatePostFX(dt);
 
     /* ---- rendu ---- */
@@ -479,10 +485,6 @@ export class PhysicsEngine {
       const gl = this.renderer.getContext() as any;
       if (this.isNative && typeof gl.endFrameEXP === 'function') gl.endFrameEXP();
     }
-
-    /* ---- résolution dynamique ---- */
-    this.frameAvg = lerp(this.frameAvg, dt, 0.08);
-    this.adaptResolution(dt);
 
     this.onFrame?.(dt);
   }

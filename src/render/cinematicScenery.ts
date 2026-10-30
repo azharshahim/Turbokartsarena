@@ -140,6 +140,9 @@ export class CinematicScenery {
     }
     if (ocean || tropical) {
       const bird = geo(new T.BufferGeometry()); bird.setAttribute('position', new T.Float32BufferAttribute([-.8,0,0, 0,.15,0, 0,0,.3, 0,0,.3, 0,.15,0, .8,0,0], 3));
+      // PBR needs a non-zero normal. Missing normals produced NaN HDR pixels;
+      // bloom then spread those few bird pixels across most of the screen.
+      bird.computeVertexNormals();
       const flock = new T.InstancedMesh(bird, mat(0xe8f6ec), 5 * detail);
       for (let i = 0; i < flock.count; i++) { this.dummy.position.set(center.x + i * 10 - 50, minY + 35 + i % 3 * 3, center.z + 40); this.dummy.scale.setScalar(1.8); this.dummy.updateMatrix(); flock.setMatrixAt(i, this.dummy.matrix); }
       this.moving.push({ object: flock, phase: 0, y: 0 }); this.group.add(flock);

@@ -1,5 +1,5 @@
 // Updated by preview:build when the application shell changes.
-const CACHE_VERSION = '7882f2eba081a65e';
+const CACHE_VERSION = '9d48da9dc5a2d6b2';
 const CACHE_PREFIX = `turbo-karts-arena:${self.registration.scope}:`;
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icons/icon-192.png', './icons/icon-512.png'];

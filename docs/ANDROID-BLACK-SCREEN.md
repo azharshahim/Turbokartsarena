@@ -54,3 +54,73 @@ npm run test:browser:android
 Sur la version de test de la PR (pas le site public inchangé), ouvrir Chrome normal puis privé, pivoter portrait/paysage, changer la taille d'affichage, ouvrir le garage et lancer une course. Si un panneau d'erreur apparaît, ouvrir **Détails techniques à transmettre** et envoyer le texte ou une capture avec le modèle de téléphone et la version de Chrome. Ne pas effacer les achats pour ce diagnostic.
 
 Sans ce test, ne pas affirmer que le défaut spécifique du Samsung est définitivement résolu. Aucun appareil Android natif ou émulateur n'est disponible ici ; le typecheck / build CI ne remplace pas sa validation à l'exécution. Aucune fusion et aucune publication autorisées par cette mission.
+
+## Complément PR nº6 — noir transitoire à un rétrécissement
+
+**Il ne s'agit pas d'un redimensionnement de Chrome.** L'événement est `narrow`,
+créé dans `src/core/hazards.ts` lorsque la demi-largeur diminue de plus de 1,4 m
+sur un échantillon de 30 m. Son libellé actuel est `Rétrécissement`.
+Le HUD HTML sélectionne le prochain danger à 45–100 m et change/efface son
+avertissement après le passage. Il n'existe pas de transition graphique propre
+au rétrécissement ni d'appel viewport/scissor lié à cet avertissement.
+
+### Défauts confirmés et corrections limitées
+
+1. **Géométrie des oiseaux sans normales**, avec un `MeshStandardMaterial` PBR
+   dans `cinematicScenery.ts` (thèmes côtiers/tropicaux). Les pixels des oiseaux
+   deviennent NaN dans la cible HDR ; les cinq niveaux de flou du bloom propagent
+   ensuite ces valeurs sur de grandes surfaces, rendues noires à l'écran.
+   Une lecture flottante de la scène avant bloom détecte 233 pixels RGB invalides
+   dans une vue de départ ; le raycast des pixels invalides pointe vers les
+   oiseaux. Désactiver temporairement chaque passe pour isoler la cause montre
+   que seul le retrait du bloom supprime l'extension du noir. **Ce retrait n'est
+   pas le correctif** : `computeVertexNormals()` sur les deux triangles des oiseaux
+   suffit, sans enlever les oiseaux, leurs mouvements, le HDR ou les effets V4.
+2. **Adaptation de résolution après le rendu** : `renderer.setPixelRatio()`
+   réallouait/effaçait le canvas après la dernière passe. La sonde obtient alors
+   100 % de pixels noirs, sans événement de resize de fenêtre ni erreur WebGL.
+   L'adaptation est désormais effectuée **avant** le rendu et la présentation
+   native, afin de redessiner dans le nouveau buffer pendant la même frame.
+   Les seuils, budgets, effets et règles d'adaptation restent inchangés.
+
+### Reproduction et non-régression
+
+- Baseline `d9eb076`, Chromium 131 / SwiftShader, tactile paysage 915×412 DPR2,
+  qualité haute, positions contrôlées sur le circuit **coast** : à ~408 m,
+  « Rétrécissement · 13 m » et **67,96 % de pixels noirs** ; à ~423 m, retour
+  au rendu normal. Avec les normales ajoutées, ~408 m donne **1,92 %** de pixels
+  sombres (ombres/détails normaux). Une autre vue reproduit une bande visible
+  à gauche seulement. L'étendue et le côté restant visible dépendent de la vue.
+- Viewport couvrant le canvas, scissor **désactivé** (sa boîte mémorisée ne
+  découpe donc rien), framebuffer par défaut et cibles inspectées **complets**,
+  erreurs GL **0**. Aucun grand élément de scène/overlay HTML n'est retenu comme
+  cause du défaut reproduit ; le noir est propagé dans les textures HDR du bloom.
+- `test:v4` échoue avant correction sur les normales manquantes des oiseaux,
+  puis passe. Il vérifie les normales présentes/finies des décors PBR construits
+  par cette suite, en plus de ses vérifications V4 existantes.
+- Nouveau `npm run test:browser:narrowing` : **15 cas PASS**, quatre approches de
+  rétrécissement du circuit côtier et leurs sorties ; séquence avant/pendant/après
+  répétée avec résolution stable, baisse et remontée. Lecture HDR avant bloom,
+  couverture noire totale/droite, viewport, scissor, framebuffer, dimensions CSS
+  et buffer, avertissement et maintien de toutes les passes sont vérifiés.
+  Aucun resize de fenêtre, aucune exception JS ni requête échouée. Avant le
+  correctif, ce test échoue avec **66 composantes HDR non finies** et une image
+  entièrement noire dans sa première position. Après, tous les cas ont zéro
+  composante HDR non finie et moins de 2,8 % de pixels sombres.
+- Typecheck, build web, suite V4, test Android démarrage/contexte et régression
+  navigateur pause/tactile : **PASS après ce complément**. Rapport mesuré :
+  `diagnostics/narrowing-webgl.json`. Captures réellement rendues et rapport
+  complet conservés par la CI dans `narrowing-webgl-diagnostics`.
+
+**Limites importantes :** le noir partiel/transitoire est reproduit et sa cause
+corrigée dans les conditions ci-dessus, mais pas sur le Samsung de l'utilisateur.
+La disparition anormale du texte HTML pendant le noir **n'est pas reproduite** :
+il reste visible dans la capture de rétrécissement ; son changement après le
+passage, lui, est normal et testé. Aucun test de tous les segments de tous les
+circuits ni de GPU mobile physique n'est revendiqué. Il faut encore confirmer
+sur le téléphone le noir au démarrage **et** la séquence exacte signalée en course
+(circuit, modèle de téléphone et version de Chrome utiles si elle persiste).
+
+La PR nº6 reste la seule PR de correction. Aucun merge, déploiement ni publication
+APK. Aucun dispatch Android supplémentaire : seule la validation automatique
+habituelle de la PR s'applique au changement du moteur partagé web/natif.
