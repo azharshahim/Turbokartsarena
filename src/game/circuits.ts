@@ -160,11 +160,16 @@ THEMES.mediterranean = {
   foliage: [0x456a44, 0x6e814e, 0x89935a],
 };
 
+THEMES.alpes = { id:'alpes', name:'Alpes Extrêmes', skyTop:0x3a7bd5, skyHorizon:0xd6ecff, skySun:0xffffff, fogColor:0xdceeff, fogDensity:0.0022, sunDir:[0.4,0.8,0.3], sunColor:0xffffff, sunIntensity:1.9, hemiSky:0xeaf6ff, hemiGround:0x8a97a8, hemiIntensity:0.45, groundColor:0xeef4fa, roadColor:0x3c414d, curbColors:[0x2f7fd6,0xffffff], foliage:[0x2e6b46,0x3f8f5c], rock:0x7e8896, water:0x3fa8d8, mood:'day', ambientBoost:1 };
+THEMES.ocean = { id:'ocean', name:'Océan Paradise', skyTop:0x2fb9d6, skyHorizon:0xbdf3ff, skySun:0xfff8dc, fogColor:0xc4f2f7, fogDensity:0.0012, sunDir:[0.5,0.75,0.4], sunColor:0xfff2d8, sunIntensity:2.0, hemiSky:0xe0fbff, hemiGround:0xd8c9a0, hemiIntensity:0.45, groundColor:0xf0dfae, roadColor:0x40434e, curbColors:[0xff6b8a,0xffffff], foliage:[0x2f9e5f,0x53c46a,0x1f8a6a], rock:0xa89880, water:0x18c8dc, mood:'day', ambientBoost:1.05 };
+THEMES.tropical = { id:'tropical', name:'Montagne Tropicale', skyTop:0x2f8fd0, skyHorizon:0xbfe8d8, skySun:0xfff4d6, fogColor:0xcfe8d8, fogDensity:0.003, sunDir:[0.35,0.65,0.45], sunColor:0xfff2d8, sunIntensity:1.7, hemiSky:0xe2ffe8, hemiGround:0x5f7a4a, hemiIntensity:0.5, groundColor:0x4f9e4a, roadColor:0x3b3f45, curbColors:[0xffc21f,0x207a4a], foliage:[0x1f8a44,0x2fbf5c,0x65d44e,0x0f7a5c], rock:0x6e7a6a, water:0x2fc8b8, mood:'day', ambientBoost:1 };
+THEMES.volcanic = { id:'volcanic', name:'Îles Volcaniques', skyTop:0x4a3a5e, skyHorizon:0xff9a6a, skySun:0xffe0b8, fogColor:0xd88a6a, fogDensity:0.0024, sunDir:[-0.45,0.5,0.5], sunColor:0xffc9a1, sunIntensity:1.9, hemiSky:0xffd8c0, hemiGround:0x4a3a38, hemiIntensity:0.45, groundColor:0x3a3236, roadColor:0x2f2b33, curbColors:[0xff5a2e,0x1c1c22], foliage:[0x3f7a3a,0x5f9e4a], rock:0x2e2628, water:0x1f7ab8, mood:'sunset', ambientBoost:1 };
+
 export interface Circuit extends TrackLayout {
   themeId: keyof typeof THEMES;
   subtitle: string;
   difficulty?: 'Facile' | 'Intermédiaire' | 'Difficile';
-  environment?: 'alpine' | 'city' | 'dunes' | 'jungle' | 'mediterranean';
+  environment?: 'alpine' | 'city' | 'dunes' | 'jungle' | 'mediterranean' | 'ocean' | 'tropical' | 'volcanic';
   rain?: boolean;
   /** Segments authored in normalized arc length, shared by rendering and warnings. */
   features?: Array<{ kind: 'tunnel' | 'bridge' | 'works' | 'rocks'; start: number; end: number }>;
@@ -482,6 +487,10 @@ export const CIRCUITS: Circuit[] = [
       { x: -65, y: 0, z: -20 },
     ],
   },
+  { id:'alpes-extremes', name:'Alpes Extrêmes', subtitle:'Neige · tunnels et falaises', themeId:'alpes', theme:'alpes', environment:'alpine', difficulty:'Difficile', seed:8801, width:17, widthVariance:4, widthScale:1.25, maxCurvature:0.045, grandstands:2, boosts:[[0.12,0,14],[0.5,0.1,14],[0.86,-0.1,14]], rain:false, features:[{kind:'tunnel',start:0.3,end:0.4},{kind:'rocks',start:0.6,end:0.65}], control:[{x:0,y:0,z:0},{x:100,y:6,z:-20},{x:200,y:14,z:30},{x:225,y:22,z:130},{x:150,y:26,z:205},{x:55,y:20,z:225},{x:-50,y:12,z:205},{x:-135,y:6,z:145},{x:-165,y:2,z:45},{x:-95,y:0,z:-25}] },
+  { id:'ocean-paradise', name:'Océan Paradise', subtitle:'Plages · ponts et palmiers', themeId:'ocean', theme:'ocean', environment:'ocean', difficulty:'Facile', seed:8802, width:17, widthVariance:4, widthScale:1.25, maxCurvature:0.045, grandstands:2, boosts:[[0.12,0,14],[0.5,0.1,14],[0.86,-0.1,14]], rain:false, features:[{kind:'bridge',start:0.35,end:0.48}], control:[{x:0,y:4,z:0},{x:92,y:10,z:-18},{x:184,y:18,z:28},{x:207,y:26,z:120},{x:138,y:30,z:189},{x:51,y:24,z:207},{x:-46,y:16,z:189},{x:-124,y:10,z:133},{x:-152,y:6,z:41},{x:-87,y:4,z:-23}] },
+  { id:'montagne-tropicale', name:'Montagne Tropicale', subtitle:'Cascades · brouillard et ponts', themeId:'tropical', theme:'tropical', environment:'tropical', difficulty:'Intermédiaire', seed:8803, width:17, widthVariance:4, widthScale:1.25, maxCurvature:0.045, grandstands:2, boosts:[[0.12,0,14],[0.5,0.1,14],[0.86,-0.1,14]], rain:false, features:[{kind:'bridge',start:0.5,end:0.62},{kind:'works',start:0.22,end:0.27}], control:[{x:0,y:-6,z:0},{x:108,y:0,z:-22},{x:216,y:8,z:32},{x:243,y:16,z:140},{x:162,y:20,z:221},{x:59,y:14,z:243},{x:-54,y:6,z:221},{x:-146,y:0,z:157},{x:-178,y:-4,z:49},{x:-103,y:-6,z:-27}] },
+  { id:'iles-volcaniques', name:'Îles Volcaniques', subtitle:'Lave · tunnels et routes surélevées', themeId:'volcanic', theme:'volcanic', environment:'volcanic', difficulty:'Difficile', seed:8804, width:17, widthVariance:4, widthScale:1.25, maxCurvature:0.045, grandstands:2, boosts:[[0.12,0,14],[0.5,0.1,14],[0.86,-0.1,14]], rain:false, features:[{kind:'tunnel',start:0.55,end:0.66},{kind:'bridge',start:0.15,end:0.28},{kind:'rocks',start:0.75,end:0.8}], control:[{x:0,y:10,z:0},{x:85,y:16,z:-17},{x:170,y:24,z:26},{x:191,y:32,z:110},{x:128,y:36,z:174},{x:47,y:30,z:191},{x:-42,y:22,z:174},{x:-115,y:16,z:123},{x:-140,y:12,z:38},{x:-81,y:10,z:-21}] },
 ];
 
 export function circuitById(id: string) {

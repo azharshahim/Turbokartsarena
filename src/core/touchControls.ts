@@ -1,5 +1,5 @@
 /** État des commandes tactiles multi-doigts (Pointer Events & React Native). */
-export type TouchAction = 'left' | 'right' | 'drift' | 'brake';
+export type TouchAction = 'left' | 'right' | 'drift' | 'brake' | 'fire';
 export type TouchZoneId = TouchAction | 'pause';
 
 export interface TouchZoneRect {

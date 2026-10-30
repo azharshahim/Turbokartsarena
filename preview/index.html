@@ -97,7 +97,7 @@
       .overlay {
         position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
         background: radial-gradient(120% 120% at 50% 0%, #16224a 0%, #070a16 62%);
-        gap: 12px; padding: 26px; text-align: center; z-index: 20;
+        gap: 12px; padding: 26px 26px calc(30px + env(safe-area-inset-bottom, 34px)); text-align: center; z-index: 20; overflow-y: auto;
       }
       .overlay.hidden { display: none; }
       .glow { position: absolute; top: -180px; width: 620px; height: 620px; border-radius: 50%;
@@ -230,6 +230,7 @@
         <button class="padBtn" id="leftBtn" type="button" aria-label="Gauche">◀</button>
         <button class="padBtn" id="rightBtn" type="button" aria-label="Droite">▶</button>
         <div class="spacer" style="flex: 1"></div>
+        <button class="actionBtn" id="fireBtn" type="button" aria-label="Tirer" style="background:rgba(255,154,46,.8)">🎯<span id="fireLabel">TIR —</span></button>
         <button class="actionBtn" id="brakeBtn" type="button" aria-label="Freiner">
           <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M12 3l7 3v6c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"/></svg>
           FREIN
@@ -245,7 +246,7 @@
     <div class="overlay" id="menu">
       <div class="glow"></div>
       <h1>TURBO<em> KARTS</em></h1>
-      <div class="sub">A R E N A · 2.0</div>
+      <div class="sub">A R E N A · 3.0</div>
       <div class="garageLayout">
         <div class="garageView"><canvas id="garageCanvas" aria-label="Aperçu 3D du pilote et du véhicule sélectionnés"></canvas><div id="garageLabel"></div></div>
         <div class="garageOptions">
@@ -273,6 +274,8 @@
         <div><div class="pickTitle" id="vehicleName"></div><div class="pickSub" id="vehicleSub"></div></div>
         <button class="arrow" id="vehicleNext" aria-label="Véhicule suivant">›</button>
       </div>
+      <div id="garageCoins" style="color:#ffd21f;font-weight:900"></div>
+      <div class="tools"><button class="tool" id="buyVehicleBtn"></button><button class="tool" id="upgradeBtn"></button></div>
       <button class="tool" id="difficultyToggle"></button>
       <div class="stats" id="stats"></div>
 

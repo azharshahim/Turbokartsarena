@@ -41,6 +41,8 @@ import { createPostFX, type PostFX } from './postfx';
 import { EffectsRegistry } from './particles';
 import { buildEnvironment, SkyDome } from './sky';
 import { glowTexture, smokeTexture } from './textures';
+import { aiShouldFire, applyHit, fireWeapon, makeRacer, pickupGift, projectileHits, recoverSpeed, spawnGifts, stepProjectile, updateGifts, type Gift, type Projectile, type RacerCombat, type WeaponKind } from '../core/powerups';
+import { createGiftMesh, createShieldBubble, updateGiftMesh } from './gifts3d';
 
 export interface EngineOptions {
   /** Contexte WebGL (expo-gl) ou null si `canvas` est fourni. */
@@ -112,6 +114,17 @@ export class PhysicsEngine {
 
   /* HUD / événements à remonter */
   private finishedFired = false;
+
+  /* ---- V3 : cadeaux, combat, projectiles ---- */
+  readonly combat: RacerCombat[] = [];
+  private gifts: Gift[] = [];
+  private giftMeshes: THREE.Group[] = [];
+  private giftPos: Array<{ x: number; y: number; z: number }> = [];
+  private projectiles: Array<{ p: Projectile; mesh: THREE.Mesh; travelled: number }> = [];
+  private shieldMeshes: THREE.Mesh[] = [];
+  private aiLastShot: number[] = [];
+  combatEvent = '';
+  private combatEventAt = -10;
 
   constructor(opts: EngineOptions) {
     this.circuit = opts.circuit;
@@ -310,6 +323,29 @@ export class PhysicsEngine {
       this.scene.add(model.root);
     }
 
+    /* ---------------- V3 : cadeaux 3D + boucliers ---------------- */
+    const samples = this.race.track.samples;
+    this.gifts = spawnGifts(12, opts.circuit.seed);
+    for (const gift of this.gifts) {
+      const smp = samples[Math.min(samples.length - 1, Math.floor(gift.s * samples.length))];
+      const px = smp.x + smp.rx * gift.lateral * smp.halfWidth;
+      const pz = smp.z + smp.rz * gift.lateral * smp.halfWidth;
+      this.giftPos.push({ x: px, y: smp.y, z: pz });
+      const mesh = createGiftMesh(gift);
+      mesh.position.set(px, smp.y + 1, pz);
+      this.giftMeshes.push(mesh);
+      this.scene.add(mesh);
+    }
+    for (let i = 0; i < this.race.karts.length; i++) {
+      this.combat.push(makeRacer());
+      this.aiLastShot.push(-10);
+      const bubble = createShieldBubble();
+      bubble.visible = false;
+      bubble.position.y = 1;
+      this.shieldMeshes.push(bubble);
+      this.scene.add(bubble);
+    }
+
     /* ---------------- particules ---------------- */
     const smokeTex = smokeTexture(this.quality.level === 'low' ? 64 : 128).albedo;
     const glowTex = glowTexture(this.quality.level === 'low' ? 64 : 128).albedo;
@@ -362,6 +398,7 @@ export class PhysicsEngine {
   }
 
   restart() {
+    this.resetCombat();
     this.race.reset();
     this.race.phase = 'countdown';
     this.finishedFired = false;
@@ -389,6 +426,7 @@ export class PhysicsEngine {
       ? thinkAi(this.race.player, this.autopilotBrain, this.race.track, dt, this.elapsed, this.race.karts)
       : this.input;
     this.race.update(dt, { player: playerInput });
+    this.updateCombat(dt);
     this.consumeEvents();
 
     /* ---- visuels ---- */
@@ -660,6 +698,98 @@ export class PhysicsEngine {
   }
 
   /* ------------------------------------------------------------------ */
+
+  /* ---------------- V3 : combat ---------------- */
+  private resetCombat() {
+    for (let i = 0; i < this.combat.length; i++) this.combat[i] = makeRacer();
+    this.gifts = spawnGifts(12, this.circuit.seed);
+    for (const pr of this.projectiles) this.scene.remove(pr.mesh);
+    this.projectiles = [];
+    this.combatEvent = '';
+  }
+  firePlayerWeapon() { this.fireFrom(0); }
+  private fireFrom(i: number) {
+    const c = this.combat[i]; if (!c?.weapon) return;
+    const st = this.race.karts[i].state;
+    const kind = c.weapon;
+    if (kind === 'shockwave') {
+      c.weapon = null;
+      for (let j = 0; j < this.race.karts.length; j++) {
+        if (j === i) continue;
+        const o = this.race.karts[j].state;
+        if (Math.hypot(o.x - st.x, o.z - st.z) < 13) this.hitKart(j, i);
+      }
+      if (i === 0) this.combatEvent = 'Onde de choc !';
+      return;
+    }
+    const p = fireWeapon(c, i, st.x, st.y !== undefined ? st.z : st.z, st.heading, this.elapsed);
+    if (!p) return;
+    if (kind === 'bomb') { p.vx = 0; p.vz = 0; }
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(kind === 'bomb' ? 0.45 : 0.28, 10, 8),
+      new THREE.MeshBasicMaterial({ color: kind === 'bomb' ? 0x222222 : kind === 'homing' ? 0xff9a2e : 0xffe14d }),
+    );
+    mesh.position.set(st.x, st.y + 1, st.z);
+    this.scene.add(mesh);
+    this.projectiles.push({ p, mesh, travelled: 0 });
+  }
+  private hitKart(j: number, _owner: number) {
+    const res = applyHit(this.combat[j], this.elapsed);
+    if (res === 'hit') { this.race.karts[j].state.speed *= 0.45; if (j === 0) { this.shake = Math.max(this.shake, 0.4); this.combatEvent = 'Touché !'; this.combatEventAt = this.elapsed; } }
+    else if (res === 'shielded' && j === 0) { this.combatEvent = 'Bouclier : impact absorbé !'; this.combatEventAt = this.elapsed; }
+  }
+  private updateCombat(dt: number) {
+    const now = this.elapsed;
+    updateGifts(this.gifts, now);
+    const WEAPONS: WeaponKind[] = ['projectile', 'homing', 'bomb', 'shockwave'];
+    for (let i = 0; i < this.race.karts.length; i++) {
+      const kart = this.race.karts[i]; const c = this.combat[i]; if (!c) continue;
+      const st = kart.state;
+      recoverSpeed(c, dt);
+      st.speedMult = (now < c.boostUntil ? 1.3 : 1) * c.speedFactor;
+      const bubble = this.shieldMeshes[i];
+      if (bubble) { bubble.visible = c.shield; bubble.position.set(st.x, st.y + 1, st.z); }
+      for (let gi = 0; gi < this.gifts.length; gi++) {
+        const g = this.gifts[gi]; if (!g.active) continue;
+        const gp = this.giftPos[gi];
+        const dist = Math.hypot(st.x - gp.x, st.z - gp.z);
+        const before = c.weapon;
+        if (pickupGift(c, g, now, dist)) {
+          if (g.kind === 'weapon') c.weapon = WEAPONS[g.id % WEAPONS.length];
+          if (i === 0) {
+            this.combatEvent = { turbo: 'Turbo !', superTurbo: 'Super Turbo !', shield: 'Bouclier actif !', repair: 'Réparé !', coins: '+5 Turbo Coins', weapon: 'Arme récupérée !' }[g.kind];
+            this.combatEventAt = now;
+          }
+          void before;
+        }
+      }
+      if (i > 0 && aiShouldFire(!!c.weapon, this.aiTargetAhead(i), now, this.aiLastShot[i])) { this.aiLastShot[i] = now; this.fireFrom(i); }
+    }
+    for (let gi = 0; gi < this.gifts.length; gi++) { const m = this.giftMeshes[gi]; if (m) { updateGiftMesh(m, this.gifts[gi], now); m.position.x = this.giftPos[gi].x; m.position.z = this.giftPos[gi].z; m.position.y += this.giftPos[gi].y; } }
+    // projectiles
+    for (let k = this.projectiles.length - 1; k >= 0; k--) {
+      const pr = this.projectiles[k]; const p = pr.p;
+      let target: { x: number; z: number } | undefined;
+      if (p.kind === 'homing') { let best = 1e9; for (let j = 0; j < this.race.karts.length; j++) { if (j === p.owner) continue; const o = this.race.karts[j].state; const d = Math.hypot(o.x - p.x, o.z - p.z); if (d < best) { best = d; target = o; } } }
+      stepProjectile(p, dt, target);
+      pr.travelled += Math.hypot(p.vx, p.vz) * dt;
+      pr.mesh.position.set(p.x, pr.mesh.position.y, p.z);
+      let dead = !p.alive || pr.travelled > 70 || now - p.bornAt > 12;
+      if (p.kind === 'bomb') { pr.mesh.position.y = this.race.karts[p.owner].state.y + 0.4; for (let j = 0; j < this.race.karts.length; j++) { if (j !== p.owner && projectileHits({ ...p, alive: true, kind: 'projectile' }, this.race.karts[j].state.x, this.race.karts[j].state.z, 2.4)) { this.hitKart(j, p.owner); dead = true; } } }
+      else for (let j = 0; j < this.race.karts.length; j++) { if (j === p.owner) continue; const o = this.race.karts[j].state; if (projectileHits(p, o.x, o.z)) { this.hitKart(j, p.owner); dead = true; break; } }
+      if (dead) { this.scene.remove(pr.mesh); (pr.mesh.material as THREE.Material).dispose(); pr.mesh.geometry.dispose(); this.projectiles.splice(k, 1); }
+    }
+    if (now - this.combatEventAt > 3) this.combatEvent = '';
+  }
+  private aiTargetAhead(i: number): boolean {
+    const st = this.race.karts[i].state; const fx = Math.sin(st.heading), fz = Math.cos(st.heading);
+    for (let j = 0; j < this.race.karts.length; j++) { if (j === i) continue; const o = this.race.karts[j].state; const dx = o.x - st.x, dz = o.z - st.z; if (dx * fx + dz * fz > 4 && Math.hypot(dx, dz) < 45) return true; }
+    return false;
+  }
+  get combatHud() {
+    const c = this.combat[0] ?? makeRacer();
+    return { weapon: c.weapon, shield: c.shield, coins: c.coins, health: c.health, event: this.combatEvent, projectiles: this.projectiles.length, giftsActive: this.gifts.filter((g) => g.active).length };
+  }
 
   get stats() {
     const k = this.race.player;

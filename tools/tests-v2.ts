@@ -18,14 +18,14 @@ function test(name: string, fn: () => void) {
   console.log(`PASS ${name}`);
 }
 test('8 circuits, 8 independent vehicles and 12 distinct drivers', () => {
-  assert.equal(CIRCUITS.length, 8);
-  assert.equal(VEHICLES.length, 8);
+  assert.ok(CIRCUITS.length >= 8); // V3 : les 8 circuits V2 sont conservés (vérifiés ci-dessous)
+  assert.ok(VEHICLES.length >= 8);
   assert.equal(ROSTER.length, 12);
   assert.equal(new Set(ROSTER.map((p) => p.id)).size, 12);
   assert.equal(new Set(ROSTER.map((p) => p.suitColor)).size, 12);
-  assert.equal(VEHICLES.filter((v) => v.kind === 'kart').length, 4);
-  assert.equal(VEHICLES.filter((v) => v.kind === 'sport').length, 2);
-  assert.equal(new Set(CIRCUITS.map((c) => JSON.stringify(c.control))).size, 8);
+  assert.ok(VEHICLES.filter((v) => v.kind === 'kart').length >= 4);
+  assert.ok(VEHICLES.filter((v) => v.kind === 'sport').length >= 2);
+  assert.equal(new Set(CIRCUITS.map((c) => JSON.stringify(c.control))).size, CIRCUITS.length);
 });
 for (const circuit of CIRCUITS)
   test(`${circuit.name}: hazards reflect actual geometry/features and signs clear all road ribbons`, () => {

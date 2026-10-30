@@ -43,6 +43,9 @@ import {
   type TouchZoneRect,
 } from './src/core/touchControls';
 import Icon from './src/ui/icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { awardRace, buyUpgrade, buyVehicle, defaultGarage, loadGarage, upgradeCost, upgradedProfile, upgradeMultiplier, UPGRADE_KINDS, GARAGE_STORAGE_KEY, type GarageState, type UpgradeKind } from './src/game/economy';
+const UP_LABEL: Record<UpgradeKind, string> = { engine: 'Moteur', acceleration: 'Accélération', topSpeed: 'Vitesse max', braking: 'Freinage', grip: 'Adhérence', protection: 'Protection', turbo: 'Turbo' };
 
 type Screen = 'menu' | 'race' | 'results';
 
@@ -64,8 +67,8 @@ const DEFAULT_SETTINGS: Settings = {
   difficulty: 'arcade',
 };
 
-type HeldButtons = { left: boolean; right: boolean; drift: boolean; brake: boolean };
-const EMPTY_HELD: HeldButtons = { left: false, right: false, drift: false, brake: false };
+type HeldButtons = { left: boolean; right: boolean; drift: boolean; brake: boolean; fire: boolean };
+const EMPTY_HELD: HeldButtons = { left: false, right: false, drift: false, brake: false, fire: false };
 
 function makeInitialHud(laps: number) {
   return {
@@ -82,6 +85,7 @@ function makeInitialHud(laps: number) {
     countdown: 0,
     best: 0,
     results: null as null | { place: number; time: number; laps: number[] },
+    weapon: null as string | null, shield: false, coins: 0, combatEvent: '', health: 100,
   };
 }
 
@@ -112,6 +116,11 @@ export default function App() {
   const [circuitIndex, setCircuitIndex] = useState(0);
   const [profileIndex, setProfileIndex] = useState(0);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [garage, setGarage] = useState<GarageState>(() => defaultGarage());
+  const [coinsEarned, setCoinsEarned] = useState(0);
+  const raceIdRef = useRef('');
+  useEffect(() => { AsyncStorage.getItem(GARAGE_STORAGE_KEY).then((raw) => { if (raw) setGarage(loadGarage({ getItem: () => raw, setItem: () => undefined })); }).catch(() => undefined); }, []);
+  useEffect(() => { AsyncStorage.setItem(GARAGE_STORAGE_KEY, JSON.stringify(garage)).catch(() => undefined); }, [garage]);
   const [hud, setHud] = useState(() => makeInitialHud(DEFAULT_SETTINGS.laps));
 
   const engineRef = useRef<PhysicsEngine | null>(null);
@@ -130,18 +139,22 @@ export default function App() {
 
   const syncTouchInputs = useCallback(() => {
     const c = touchControllerRef.current.controls;
+    const fireDown = c.isDown('fire');
+    if (fireDown && !inputRef.current.fire) engineRef.current?.firePlayerWeapon();
     const next: HeldButtons = {
       left: c.isDown('left'),
       right: c.isDown('right'),
       drift: c.drift,
       brake: c.brake,
+      fire: fireDown,
     };
     inputRef.current = next;
     setPressedButtons((prev) =>
       prev.left === next.left &&
       prev.right === next.right &&
       prev.drift === next.drift &&
-      prev.brake === next.brake
+      prev.brake === next.brake &&
+      prev.fire === next.fire
         ? prev
         : next,
     );
@@ -150,7 +163,7 @@ export default function App() {
   const clearHeldInputs = useCallback(() => {
     touchControllerRef.current.clear();
     inputRef.current = { ...EMPTY_HELD };
-    setPressedButtons((prev) => (prev.left || prev.right || prev.drift || prev.brake ? EMPTY_HELD : prev));
+    setPressedButtons((prev) => (prev.left || prev.right || prev.drift || prev.brake || prev.fire ? EMPTY_HELD : prev));
     gyroRef.current.rest = gyroRef.current.angle;
     engineRef.current?.setInput({ steer: 0, drift: false, brake: false, throttle: 1 });
   }, []);
@@ -207,6 +220,7 @@ export default function App() {
         best: p.state.bestLapTime,
         results: finalResults,
       }));
+      setGarage((g) => { const ng = { ...g, owned: [...g.owned], upgrades: { ...g.upgrades }, rewardedRaces: [...g.rewardedRaces], bestTimes: { ...g.bestTimes }, stats: { ...g.stats } }; const gain = awardRace(ng, raceIdRef.current || `race-${Date.now()}`, finalResults.place, targetEngine.combatHud.coins, finalResults.time, targetEngine.circuit.id); setCoinsEarned(gain); return ng; });
       if (resultsTimeoutRef.current !== null) clearTimeout(resultsTimeoutRef.current);
       resultsTimeoutRef.current = setTimeout(() => {
         resultsTimeoutRef.current = null;
@@ -302,6 +316,7 @@ export default function App() {
         countdown: race.phase === 'countdown' ? Math.max(0, Math.ceil(race.countdown)) : 0,
         best: p.state.bestLapTime,
         results: null,
+        weapon: e.combatHud.weapon, shield: e.combatHud.shield, coins: e.combatHud.coins, combatEvent: e.combatHud.event, health: e.combatHud.health,
       });
     }, 66);
   }, [settings.laps, scheduleResultsTransition]);
@@ -354,7 +369,7 @@ export default function App() {
 
   /* ---------------- démarrage / GLView ---------------- */
   const circuit: Circuit = CIRCUITS[circuitIndex];
-  const profile: KartProfile = vehicleProfile(ROSTER[profileIndex], VEHICLES[settings.vehicle]);
+  const profile: KartProfile = upgradedProfile(vehicleProfile(ROSTER[profileIndex], VEHICLES[settings.vehicle]), garage);
 
   const onContextCreate = useCallback(
     async (gl: any) => {
@@ -446,6 +461,7 @@ export default function App() {
   );
 
   const startRace = useCallback(() => {
+    raceIdRef.current = `race-${Date.now()}`; setCoinsEarned(0);
     raceSessionRef.current += 1;
     clearHeldInputs();
     stopTimers();
@@ -539,6 +555,8 @@ export default function App() {
           setProfileIndex={setProfileIndex}
           settings={settings}
           setSettings={setSettings}
+          garage={garage}
+          onGarageChange={setGarage}
           onStart={startRace}
         />
       )}
@@ -585,6 +603,8 @@ export default function App() {
           result={hud.results}
           circuitName={circuit.name}
           profile={profile}
+          coinsEarned={coinsEarned}
+          balance={garage.coins}
           onRestart={startRace}
           onQuit={quitRace}
         />
@@ -635,11 +655,17 @@ const MenuScreen: React.FC<{
   setProfileIndex: (n: number) => void;
   settings: Settings;
   setSettings: (s: Settings) => void;
+  garage: GarageState;
+  onGarageChange: (g: GarageState) => void;
   onStart: () => void;
-}> = ({ circuitIndex, setCircuitIndex, profileIndex, setProfileIndex, settings, setSettings, onStart }) => {
+}> = ({ circuitIndex, setCircuitIndex, profileIndex, setProfileIndex, settings, setSettings, garage, onGarageChange, onStart }) => {
   const circuit = CIRCUITS[circuitIndex];
   const driver = ROSTER[profileIndex];
-  const profile = vehicleProfile(driver, VEHICLES[settings.vehicle]);
+  const vehicle = VEHICLES[settings.vehicle];
+  const owned = garage.owned.includes(vehicle.id);
+  const profile = upgradedProfile(vehicleProfile(driver, vehicle), garage);
+  const [upKind, setUpKind] = useState<UpgradeKind>('engine');
+  const upLevel = garage.upgrades[vehicle.id]?.[upKind] ?? 0;
   const { width } = useWindowDimensions();
   const [showSettings, setShowSettings] = useState(false);
 
@@ -721,6 +747,22 @@ const MenuScreen: React.FC<{
           <Icon name="chevronRight" size={34} color="#9fb4ff" />
         </TouchableOpacity>
       </View>
+      <View style={{ alignItems: 'center', gap: 8, width: '100%' }}>
+        <Text style={{ color: '#ffd21f', fontWeight: '900', fontSize: 18 }}>🪙 {garage.coins} Turbo Coins</Text>
+        {!owned ? (
+          <TouchableOpacity accessibilityRole="button" style={[styles.toolButton, { borderColor: '#ffd21f' }]} onPress={() => onGarageChange((() => { const ng = { ...garage, owned: [...garage.owned] }; buyVehicle(ng, vehicle.id, vehicle.price ?? 0); return ng; })())}>
+            <Text style={styles.toolText}>{(vehicle.price ?? 0) > 0 ? `Acheter — ${vehicle.price} TC` : 'Débloquer (gratuit)'}</Text>
+          </TouchableOpacity>
+        ) : (<Text style={{ color: '#4dffc8', fontWeight: '800' }}>✓ Véhicule possédé</Text>)}
+        {owned && (<>
+          <TouchableOpacity accessibilityRole="button" style={styles.toolButton} onPress={() => setUpKind(UPGRADE_KINDS[(UPGRADE_KINDS.indexOf(upKind) + 1) % UPGRADE_KINDS.length])}>
+            <Text style={styles.toolText}>Amélioration : {UP_LABEL[upKind]} (niv. {upLevel}/5 · ×{upgradeMultiplier(garage, vehicle.id, upKind).toFixed(2)})</Text>
+          </TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" style={styles.toolButton} onPress={() => onGarageChange((() => { const ng = { ...garage, upgrades: { ...garage.upgrades } }; buyUpgrade(ng, vehicle.id, upKind); return ng; })())}>
+            <Text style={styles.toolText}>Améliorer — {upLevel >= 5 ? 'MAX' : `${upgradeCost(upKind, upLevel)} TC`}</Text>
+          </TouchableOpacity>
+        </>)}
+      </View>
       <TouchableOpacity
         style={styles.toolButton}
         onPress={() => {
@@ -740,9 +782,9 @@ const MenuScreen: React.FC<{
         {statBar('Maniabilité', profile.handling)}
       </View>
 
-      <TouchableOpacity style={styles.playButton} onPress={onStart}>
+      <TouchableOpacity style={[styles.playButton, !owned && { opacity: 0.45 }]} onPress={owned ? onStart : undefined}>
         <Icon name="play" size={30} color="#0b1020" />
-        <Text style={styles.playText}>COURSE</Text>
+        <Text style={styles.playText}>{owned ? 'COURSE' : 'VERROUILLÉ'}</Text>
       </TouchableOpacity>
 
       <View style={styles.menuTools}>
@@ -980,6 +1022,12 @@ const TouchHud: React.FC<{
         </View>
       </View>
 
+      {!!hud.combatEvent && (<View pointerEvents="none" style={{ position: 'absolute', top: 84, alignSelf: 'center', backgroundColor: '#17202edd', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 }}><Text style={{ color: '#ffe14d', fontWeight: '900' }}>{hud.combatEvent}</Text></View>)}
+      <View pointerEvents="none" style={{ position: 'absolute', top: 84, left: 16, gap: 4 }}>
+        <Text style={{ color: hud.shield ? '#4dffc8' : '#5f6f92', fontWeight: '800' }}>{hud.shield ? '🛡 Bouclier actif' : '🛡 —'}</Text>
+        <Text style={{ color: '#ffd21f', fontWeight: '800' }}>🪙 {hud.coins ?? 0} · ❤ {Math.round(hud.health ?? 100)}</Text>
+      </View>
+
       {/* compteur de vitesse */}
       <View style={styles.speedo} pointerEvents="none">
         <Text style={styles.speedValue}>{hud.speed}</Text>
@@ -1032,6 +1080,17 @@ const TouchHud: React.FC<{
             </>
           )}
           <View style={{ flex: 1 }} pointerEvents="none" />
+          <HoldButton
+            zoneId="fire"
+            pressed={pressed.fire}
+            parentOffset={controlsOffset}
+            onZoneRect={onZoneRect}
+            accessibilityLabel="Tirer"
+            style={[styles.actionButton, { backgroundColor: hud.weapon ? '#ff9a2ecc' : '#3a4358cc' }]}
+          >
+            <Text style={{ fontSize: 22 }}>🎯</Text>
+            <Text style={styles.actionText}>{hud.weapon ? 'TIR' : 'TIR —'}</Text>
+          </HoldButton>
           <HoldButton
             zoneId="brake"
             pressed={pressed.brake}
@@ -1116,14 +1175,17 @@ const ResultsScreen: React.FC<{
   result: { place: number; time: number; laps: number[] };
   circuitName: string;
   profile: KartProfile;
+  coinsEarned?: number;
+  balance?: number;
   onRestart: () => void;
   onQuit: () => void;
-}> = ({ result, circuitName, profile, onRestart, onQuit }) => (
-  <View style={styles.menu}>
+}> = ({ result, circuitName, profile, coinsEarned, balance, onRestart, onQuit }) => (
+  <ScrollView style={{flex:1, backgroundColor:'#070a16'}} contentContainerStyle={[styles.menu, { paddingBottom: 96, minHeight: '100%' }]}>
     <Text style={styles.resultsTitle}>{result.place === 1 ? 'VICTOIRE !' : `${result.place}e PLACE`}</Text>
     <Text style={styles.pickerSub}>
       {circuitName} · {profile.name}
     </Text>
+    {!!coinsEarned && (<Text style={{ color: '#ffd21f', fontWeight: '900', fontSize: 18 }}>🪙 +{coinsEarned} Turbo Coins · Solde : {balance}</Text>)}
     <View style={styles.resultsCard}>
       <View style={styles.resultsRow}>
         <Text style={styles.hudLabel}>TEMPS TOTAL</Text>
@@ -1145,7 +1207,7 @@ const ResultsScreen: React.FC<{
         <Text style={styles.toolText}>Menu</Text>
       </TouchableOpacity>
     </View>
-  </View>
+  </ScrollView>
 );
 
 /* ------------------------------------------------------------------ */
@@ -1267,7 +1329,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 24,
+    bottom: 64,
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 18,
