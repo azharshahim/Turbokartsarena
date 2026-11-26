@@ -790,12 +790,18 @@ bind('restartBtn', 'click', restartRace);
 bind('quitBtn', 'click', showMenu);
 bind('pauseBtn', 'click', () => togglePause(true));
 
+function updateSteeringFeedback() {
+  $('leftBtn').classList.toggle('active', touchPointers.isDown('left'));
+  $('rightBtn').classList.toggle('active', touchPointers.isDown('right'));
+}
+
 function releasePointerTarget(pointerId: number) {
   const target = pointerTargets.get(pointerId);
   const released = touchPointers.release(pointerId);
   if (!target) return released;
   pointerTargets.delete(pointerId);
-  if (![...pointerTargets.values()].includes(target)) target.classList.remove('active');
+  if (target.id === 'leftBtn' || target.id === 'rightBtn') updateSteeringFeedback();
+  else if (![...pointerTargets.values()].includes(target)) target.classList.remove('active');
   try {
     if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId);
   } catch {
@@ -848,12 +854,28 @@ const hold = (id: string, action: TouchAction) => {
     pointerTargets.set(e.pointerId, target);
     target.classList.add('active');
   };
+  const move = (event: Event) => {
+    const e = event as PointerEvent;
+    if ((action !== 'left' && action !== 'right') || !pointerTargets.has(e.pointerId)) return;
+    const left = $('leftBtn').getBoundingClientRect();
+    const right = $('rightBtn').getBoundingClientRect();
+    const slop = 18;
+    if (e.clientX < left.left - slop || e.clientX > right.right + slop ||
+        e.clientY < Math.min(left.top, right.top) - slop || e.clientY > Math.max(left.bottom, right.bottom) + slop) {
+      touchPointers.release(e.pointerId);
+    } else {
+      const midpoint = (left.right + right.left) / 2;
+      touchPointers.press(e.pointerId, e.clientX < midpoint ? 'left' : 'right');
+    }
+    updateSteeringFeedback();
+  };
   const end = (event: Event) => {
     const e = event as PointerEvent;
     e.preventDefault();
     releasePointerTarget(e.pointerId);
   };
   el.addEventListener('pointerdown', start);
+  el.addEventListener('pointermove', move);
   el.addEventListener('pointerup', end);
   el.addEventListener('pointercancel', end);
   el.addEventListener('lostpointercapture', end);

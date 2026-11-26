@@ -121,6 +121,12 @@ test('zones tactiles mobiles : multi-doigts, glissement, pause et annulation', (
   );
   assert(r2 === null && zones.steer === -1 && zones.drift, 'doigt #2 dérapage ignoré pendant le maintien gauche');
 
+  zones.handleTouchMove(
+    [{ identifier: 1, pageX: 50, pageY: 284 }],
+    [{ identifier: 1, pageX: 50, pageY: 284 }, { identifier: 2, pageX: 820, pageY: 340 }],
+  );
+  assert(zones.steer === -1 && zones.drift, 'la tolérance de direction doit conserver les deux doigts');
+
   // Glissement du doigt #1 de Gauche vers Droite puis hors des boutons (zone morte)
   zones.handleTouchMove(
     [{ identifier: 1, pageX: 165, pageY: 340 }],
