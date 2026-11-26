@@ -649,8 +649,10 @@ export class PhysicsEngine {
     const headingTarget = st.heading + st.visualYawSlip * 0.55;
     this.camYaw = dampAngle(this.camYaw, headingTarget, st.drifting ? 5.5 : 7.5, dt);
 
-    const back = 5.9 + speedNorm * 1.5;
-    const up = (kart.stats.bike ? 2.75 : 2.55) + speedNorm * 0.4;
+    // Rapprocher la caméra plutôt que grossir les modèles : collisions et
+    // proportions restent inchangées, avec du recul conservé à haute vitesse.
+    const back = 5.0 + speedNorm * 1.3;
+    const up = (kart.stats.bike ? 2.55 : 2.35) + speedNorm * 0.35;
     const fwdX = Math.sin(this.camYaw);
     const fwdZ = Math.cos(this.camYaw);
 
@@ -683,7 +685,7 @@ export class PhysicsEngine {
       const intro = this.race.phase === 'countdown';
       const turn = intro ? Math.max(0, this.race.countdown - .6) / 2.6 * 1.3 : this.elapsed * .7;
       const angle = st.heading + turn;
-      this.camera.position.set(st.x - Math.sin(angle) * 7, st.y + (intro ? 3.5 : 2.5), st.z - Math.cos(angle) * 7);
+      this.camera.position.set(st.x - Math.sin(angle) * 6.2, st.y + (intro ? 3.2 : 2.3), st.z - Math.cos(angle) * 6.2);
       this.camLook.set(st.x, st.y + .9, st.z);
       this.camPos.copy(this.camera.position);
     }

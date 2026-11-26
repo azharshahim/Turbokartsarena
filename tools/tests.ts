@@ -16,6 +16,7 @@ import { MultiTouchControls, TouchZoneController } from '../src/core/touchContro
 import { createMaterials, createScenery } from '../src/render/models';
 import { buildTrackMesh } from '../src/render/trackMesh';
 import * as THREE from 'three';
+import { PhysicsEngine } from '../src/render/world';
 
 let passed = 0;
 let failed = 0;
@@ -45,6 +46,38 @@ function near(actual: number, min: number, max: number, label: string) {
 }
 
 const dt = PHYSICS.fixedStep;
+
+/* ================================================================== */
+console.log('\n▸ Caméra de course');
+test('cadrage rapproché, recul à vitesse et respect du sol', () => {
+  // Exécute la vraie caméra sans créer de contexte WebGL ; piste plate contrôlée.
+  const engine: any = Object.create(PhysicsEngine.prototype);
+  const state: any = { x: 0, y: 0, z: 0, heading: 0, visualYawSlip: 0, speed: 0, drifting: false, trackIndex: 0 };
+  engine.race = { player: { state, stats: { bike: false }, isBoosting: false }, phase: 'racing', track: { query: () => ({ y: 0 }) } };
+  engine.camPos = new THREE.Vector3(); engine.camLook = new THREE.Vector3(); engine.camDesired = new THREE.Vector3();
+  engine.camYaw = 0; engine.camFov = 60; engine.shake = 0; engine.elapsed = 0; engine.reducedMotion = false;
+  engine.camera = new THREE.PerspectiveCamera(60, 915 / 412, 0.1, 1000);
+  engine.fill = new THREE.DirectionalLight(); engine.quality = { shadows: false };
+  engine.updateCamera(2);
+  near(engine.camera.position.z, -5.01, -4.99, 'recul à l’arrêt');
+  engine.camera.updateMatrixWorld();
+  const feet = new THREE.Vector3(0, 0, 0).project(engine.camera);
+  const head = new THREE.Vector3(0, 2, 0).project(engine.camera);
+  assert(feet.y > -1 && head.y < 1 && head.y > feet.y, 'kart ou pilote hors du cadre');
+  state.speed = PHYSICS.kart.maxSpeed;
+  engine.updateCamera(2);
+  near(engine.camera.position.z, -6.31, -6.29, 'recul à vitesse maximale');
+  assert(engine.camera.fov > 67, 'champ de vision dynamique perdu');
+  engine.reducedMotion = true;
+  engine.updateCamera(2);
+  near(engine.camera.fov, 59.9, 60.1, 'champ de vision mouvements réduits');
+  engine.race.track.query = () => ({ y: 5 });
+  engine.updateCamera(2);
+  assert(engine.camera.position.y >= 6.49, 'caméra sous le sol');
+  engine.reducedMotion = false; engine.race.phase = 'countdown'; engine.race.countdown = 0.6;
+  engine.updateCamera(2);
+  near(engine.camera.position.z, -6.21, -6.19, 'recul au départ');
+});
 
 /* ================================================================== */
 console.log('\n▸ Convention d’axes');
