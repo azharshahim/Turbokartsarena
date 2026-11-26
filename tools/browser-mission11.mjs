@@ -115,6 +115,30 @@ try {
     }
   }
 
+  /* Steering follows a captured thumb across both buttons, without losing drift. */
+  await page.evaluate(() => {
+    const left = document.getElementById('leftBtn');
+    const right = document.getElementById('rightBtn');
+    const drift = document.getElementById('driftBtn');
+    const l = left.getBoundingClientRect(), r = right.getBoundingClientRect(), d = drift.getBoundingClientRect();
+    const send = (el, type, id, x, y) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: id, pointerType: 'touch', clientX: x, clientY: y }));
+    const check = (condition, message) => { if (!condition) throw new Error(message); };
+    send(left, 'pointerdown', 101, l.x + l.width / 2, l.y + l.height / 2);
+    send(drift, 'pointerdown', 102, d.x + d.width / 2, d.y + d.height / 2);
+    check(window.__tka.currentSteer() === -1 && window.__tka.currentDrift(), 'left + drift');
+    send(left, 'pointermove', 101, r.x + r.width / 2, r.y + r.height / 2);
+    check(window.__tka.currentSteer() === 1 && window.__tka.currentDrift() && right.classList.contains('active'), 'slide right + drift');
+    send(left, 'pointermove', 101, r.x + r.width / 2, r.y - 15);
+    check(window.__tka.currentSteer() === 1, 'steering tolerance');
+    send(left, 'pointermove', 101, r.x + r.width / 2, r.y - 30);
+    check(window.__tka.currentSteer() === 0 && window.__tka.currentDrift(), 'outside releases steering');
+    send(left, 'pointermove', 101, l.x + l.width / 2, l.y + l.height / 2);
+    check(window.__tka.currentSteer() === -1, 're-enter steering');
+    send(left, 'pointercancel', 101, 0, 0);
+    send(drift, 'pointerup', 102, 0, 0);
+    check(window.__tka.currentSteer() === 0 && !window.__tka.currentDrift(), 'cancel and release');
+  });
+
   /* ---------- 3. Bouton TURBO : disponibilité, état actif ---------- */
   const turboIdle = await page.evaluate(() => ({
     className: document.getElementById('turboBtn').className,

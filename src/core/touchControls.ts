@@ -160,7 +160,7 @@ export class TouchZoneController {
     }
     for (const t of changedTouches) {
       const current = this.controls.actionFor(t.identifier);
-      const slop = current ? 12 : 6;
+      const slop = current === 'left' || current === 'right' ? 18 : current ? 12 : 6;
       const zone = this.hitTest(t.pageX, t.pageY, slop, false);
       if (zone && zone !== 'pause') {
         this.controls.press(t.identifier, zone);

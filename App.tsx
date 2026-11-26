@@ -1274,7 +1274,7 @@ const HoldButton: React.FC<{
 };
 
 /** V4.1 — cibles tactiles généreuses, jamais collées aux bords sûrs. */
-const PAD_SIZE = 96;
+const PAD_SIZE = 112;
 const PAD_LEFT = 18;
 
 const TouchHud: React.FC<{
@@ -1304,6 +1304,11 @@ const TouchHud: React.FC<{
   const pauseBtnRef = useRef<View | null>(null);
   const pauseLocalRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const { width: winW, height: winH } = useWindowDimensions();
+  // Leave room for the action cluster on narrow landscape screens.
+  const actionCount = manualThrottle ? 5 : 4;
+  const actionSize = Math.min(88, Math.max(44, (winW - 36 - 14 - 144 - actionCount * 10) / actionCount));
+  const steeringSpace = (winW - 36 - 14 - actionCount * (actionSize + 10)) / 2;
+  const padSize = Math.max(44, Math.min(PAD_SIZE, Math.max(72, winH * 0.28), winW * 0.19, steeringSpace));
 
   const updatePauseRect = useCallback(() => {
     if (paused) {
@@ -1461,7 +1466,7 @@ const TouchHud: React.FC<{
                 parentOffset={controlsOffset}
                 onZoneRect={onZoneRect}
                 accessibilityLabel="Gauche"
-                style={[styles.padButton, { left: PAD_LEFT }]}
+                style={[styles.padButton, { left: PAD_LEFT, width: padSize, height: padSize }, pressed.left && styles.padPressed]}
               >
                 <Icon name="chevronLeft" size={40} color="#fff" />
               </HoldButton>
@@ -1471,7 +1476,7 @@ const TouchHud: React.FC<{
                 parentOffset={controlsOffset}
                 onZoneRect={onZoneRect}
                 accessibilityLabel="Droite"
-                style={[styles.padButton, { left: PAD_LEFT + PAD_SIZE + 14 }]}
+                style={[styles.padButton, { left: PAD_LEFT + padSize + 14, width: padSize, height: padSize }, pressed.right && styles.padPressed]}
               >
                 <Icon name="chevronRight" size={40} color="#fff" />
               </HoldButton>
@@ -1485,7 +1490,7 @@ const TouchHud: React.FC<{
               parentOffset={controlsOffset}
               onZoneRect={onZoneRect}
               accessibilityLabel="Accélérer"
-              style={[styles.actionButton, styles.accelButton]}
+              style={[styles.actionButton, styles.accelButton, { width: actionSize }]}
             >
               <Text style={styles.actionText}>GAZ</Text>
             </HoldButton>
@@ -1496,7 +1501,7 @@ const TouchHud: React.FC<{
             parentOffset={controlsOffset}
             onZoneRect={onZoneRect}
             accessibilityLabel="Tirer"
-            style={[styles.actionButton, styles.fireButton, { opacity: hud.weapon ? 1 : 0.75 }]}
+            style={[styles.actionButton, styles.fireButton, { width: actionSize, height: actionSize, opacity: hud.weapon ? 1 : 0.75 }]}
           >
             <Text style={{ fontSize: 20 }}>🎯</Text>
             <Text style={styles.actionText}>{hud.weapon ? 'TIR' : 'TIR —'}</Text>
@@ -1509,6 +1514,7 @@ const TouchHud: React.FC<{
             accessibilityLabel="Turbo"
             style={[
               styles.actionButton,
+              { width: actionSize, height: actionSize },
               turbo.active
                 ? styles.turboButtonActive
                 : turbo.ready
@@ -1527,7 +1533,7 @@ const TouchHud: React.FC<{
             parentOffset={controlsOffset}
             onZoneRect={onZoneRect}
             accessibilityLabel="Frein"
-            style={[styles.actionButton, styles.brakeButton]}
+            style={[styles.actionButton, styles.brakeButton, { width: actionSize, height: actionSize }]}
           >
             <Icon name="shield" size={22} color="#fff" />
             <Text style={styles.actionText}>FREIN</Text>
@@ -1538,7 +1544,7 @@ const TouchHud: React.FC<{
             parentOffset={controlsOffset}
             onZoneRect={onZoneRect}
             accessibilityLabel={bike ? 'Glisse et turbo moto' : 'Dérapage'}
-            style={[styles.actionButton, styles.driftButton]}
+            style={[styles.actionButton, styles.driftButton, { width: actionSize, height: actionSize }]}
           >
             <Icon name="drift" size={24} color="#fff" />
             <Text style={styles.actionText}>{bike ? 'GLISSE / TURBO' : 'DÉRAPAGE'}</Text>
@@ -1809,6 +1815,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#2b3b5e',
   },
+  padPressed: { backgroundColor: '#276c91', borderColor: '#82e3ff' },
   actionButton: {
     width: 88,
     height: 88,

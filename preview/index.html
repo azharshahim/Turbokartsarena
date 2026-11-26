@@ -78,7 +78,7 @@
          Chaque bouton garde une cible ≥ 64 px : utilisable au pouce, sans masquer
          le centre de l'écran où se trouve la trajectoire. */
       :root {
-        --pad: clamp(76px, 23vh, 108px);
+        --pad: min(clamp(84px, 28vh, 120px), 19vw);
         --act: clamp(62px, 19.5vh, 96px);
         --ctl-gap: clamp(8px, 1.5vh, 14px);
         --edge-l: max(12px, env(safe-area-inset-left));
@@ -100,7 +100,7 @@
         transition: transform 0.08s, background 0.12s; backdrop-filter: blur(6px);
         touch-action: none; user-select: none; -webkit-user-select: none;
       }
-      .padBtn.active { background: rgba(64, 200, 255, 0.4); transform: scale(0.95); }
+      .padBtn.active { background: rgba(64, 200, 255, 0.55); border-color: #82e3ff; box-shadow: 0 0 18px rgba(64, 200, 255, 0.45); transform: scale(0.95); }
       .actionBtn {
         pointer-events: auto; width: var(--act); height: var(--act); border-radius: 28%;
         display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
@@ -204,7 +204,7 @@
         #rotateNotice svg { width: 42px; height: 42px; color: #40c8ff; }
       }
       @media (max-width: 760px) {
-        :root { --act: clamp(56px, 17.5vh, 84px); --pad: clamp(72px, 21vh, 96px); }
+        :root { --act: clamp(56px, 17.5vh, 84px); --pad: min(clamp(80px, 27vh, 112px), 19vw); }
         .hud-top { gap: 6px; }
         .panel { padding: 6px 9px; }
         .value { font-size: 20px; }
